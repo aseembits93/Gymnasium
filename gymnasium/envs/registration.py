@@ -293,13 +293,16 @@ def get_env_id(ns: str | None, name: str, version: int | None) -> str:
     Returns:
         The environment id
     """
-    full_name = name
     if ns is not None:
-        full_name = f"{ns}/{name}"
-    if version is not None:
-        full_name = f"{full_name}-v{version}"
-
-    return full_name
+        if version is not None:
+            return f"{ns}/{name}-v{version}"
+        else:
+            return f"{ns}/{name}"
+    else:
+        if version is not None:
+            return f"{name}-v{version}"
+        else:
+            return name
 
 
 def find_highest_version(ns: str | None, name: str) -> int | None:
