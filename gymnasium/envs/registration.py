@@ -312,14 +312,16 @@ def find_highest_version(ns: str | None, name: str) -> int | None:
     Returns:
         The highest version of an environment with matching namespace and name, otherwise ``None`` is returned.
     """
-    version: list[int] = [
-        env_spec.version
-        for env_spec in registry.values()
-        if env_spec.namespace == ns
-        and env_spec.name == name
-        and env_spec.version is not None
-    ]
-    return max(version, default=None)
+    version = None
+    for env_spec in registry.values():
+        if (
+            env_spec.namespace == ns
+            and env_spec.name == name
+            and env_spec.version is not None
+        ):
+            if version is None or env_spec.version > version:
+                version = env_spec.version
+    return version
 
 
 def _check_namespace_exists(ns: str | None):
