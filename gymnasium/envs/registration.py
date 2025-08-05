@@ -278,7 +278,6 @@ def parse_env_id(env_id: str) -> tuple[str | None, str, int | None]:
     ns, name, version = match.group("namespace", "name", "version")
     if version is not None:
         version = int(version)
-
     return ns, name, version
 
 
@@ -293,13 +292,14 @@ def get_env_id(ns: str | None, name: str, version: int | None) -> str:
     Returns:
         The environment id
     """
-    full_name = name
-    if ns is not None:
-        full_name = f"{ns}/{name}"
-    if version is not None:
-        full_name = f"{full_name}-v{version}"
-
-    return full_name
+    # Fast path, avoid f-string when possible
+    if ns is None and version is None:
+        return name
+    if ns is None:
+        return name + f"-v{version}"
+    if version is None:
+        return ns + "/" + name
+    return ns + "/" + name + f"-v{version}"
 
 
 def find_highest_version(ns: str | None, name: str) -> int | None:
@@ -312,14 +312,13 @@ def find_highest_version(ns: str | None, name: str) -> int | None:
     Returns:
         The highest version of an environment with matching namespace and name, otherwise ``None`` is returned.
     """
-    version: list[int] = [
-        env_spec.version
-        for env_spec in registry.values()
-        if env_spec.namespace == ns
-        and env_spec.name == name
-        and env_spec.version is not None
-    ]
-    return max(version, default=None)
+    versions = []
+    for env_spec in _iter_env_specs_by_ns_name(ns, name):
+        if env_spec.version is not None:
+            versions.append(env_spec.version)
+    if versions:
+        return max(versions)
+    return None
 
 
 def _check_namespace_exists(ns: str | None):
@@ -386,7 +385,9 @@ def _check_version_exists(ns: str | None, name: str, version: int | None):
         VersionNotFound: The ``version`` used doesn't exist
         DeprecatedEnv: Environment version is deprecated
     """
-    if get_env_id(ns, name, version) in registry:
+    # Fast path: registry lookup
+    env_id = get_env_id(ns, name, version)
+    if env_id in registry:
         return
 
     _check_name_exists(ns, name)
@@ -395,38 +396,30 @@ def _check_version_exists(ns: str | None, name: str, version: int | None):
 
     message = f"Environment version `v{version}` for environment `{get_env_id(ns, name, None)}` doesn't exist."
 
-    env_specs = [
-        env_spec
-        for env_spec in registry.values()
-        if env_spec.namespace == ns and env_spec.name == name
-    ]
-    env_specs = sorted(env_specs, key=lambda env_spec: int(env_spec.version or -1))
+    # One-pass registry filter
+    env_specs = list(_iter_env_specs_by_ns_name(ns, name))
+    # Sorts by int(env_spec.version or -1)
+    env_specs.sort(key=lambda e: int(e.version) if e.version is not None else -1)
 
-    default_spec = [env_spec for env_spec in env_specs if env_spec.version is None]
-
+    default_spec = next((e for e in env_specs if e.version is None), None)
     if default_spec:
-        message += f" It provides the default version `{default_spec[0].id}`."
+        message += f" It provides the default version `{default_spec.id}`."
         if len(env_specs) == 1:
             raise error.DeprecatedEnv(message)
 
-    # Process possible versioned environments
+    versioned_specs = [e for e in env_specs if e.version is not None]
+    latest_spec = max(versioned_specs, key=lambda e: e.version, default=None)
 
-    versioned_specs = [
-        env_spec for env_spec in env_specs if env_spec.version is not None
-    ]
-
-    latest_spec = max(versioned_specs, key=lambda env_spec: env_spec.version, default=None)  # type: ignore
-    if latest_spec is not None and version > latest_spec.version:
-        version_list_msg = ", ".join(f"`v{env_spec.version}`" for env_spec in env_specs)
-        message += f" It provides versioned environments: [ {version_list_msg} ]."
-
-        raise error.VersionNotFound(message)
-
-    if latest_spec is not None and version < latest_spec.version:
-        raise error.DeprecatedEnv(
-            f"Environment version v{version} for `{get_env_id(ns, name, None)}` is deprecated. "
-            f"Please use `{latest_spec.id}` instead."
-        )
+    if latest_spec is not None:
+        if version > latest_spec.version:
+            version_list_msg = ", ".join(f"`v{e.version}`" for e in env_specs)
+            message += f" It provides versioned environments: [ {version_list_msg} ]."
+            raise error.VersionNotFound(message)
+        if version < latest_spec.version:
+            raise error.DeprecatedEnv(
+                f"Environment version v{version} for `{get_env_id(ns, name, None)}` is deprecated. "
+                f"Please use `{latest_spec.id}` instead."
+            )
 
 
 def _check_spec_register(testing_spec: EnvSpec):
@@ -487,11 +480,13 @@ def _check_metadata(testing_metadata: dict[str, Any]):
 
 
 def _find_spec(env_id: str) -> EnvSpec:
-    # For string id's, load the environment spec from the registry then make the environment spec
+    # Fast path: Already registered ID
+    if env_id in registry:
+        return registry[env_id]
+
     assert isinstance(env_id, str)
 
-    # The environment name can include an unloaded module in "module:env_name" style
-    module, env_name = (None, env_id) if ":" not in env_id else env_id.split(":")
+    module, env_name = (None, env_id) if ":" not in env_id else env_id.split(":", 1)
     if module is not None:
         try:
             importlib.import_module(module)
@@ -501,18 +496,18 @@ def _find_spec(env_id: str) -> EnvSpec:
                 f"Check whether '{module}' contains env registration and can be imported."
             ) from e
 
-    # load the env spec from the registry
     env_spec = registry.get(env_name)
 
-    # update env spec is not version provided, raise warning if out of date
     ns, name, version = parse_env_id(env_name)
 
     latest_version = find_highest_version(ns, name)
+    # Out of date warning
     if version is not None and latest_version is not None and latest_version > version:
         logger.deprecation(
             f"The environment {env_name} is out of date. You should consider "
             f"upgrading to version `v{latest_version}`."
         )
+    # Alias unversioned envs to versioned
     if version is None and latest_version is not None:
         version = latest_version
         new_env_id = get_env_id(ns, name, version)
@@ -1081,3 +1076,9 @@ def pprint_registry(
         return "\n".join(output)
     else:
         print("\n".join(output))
+
+# Helper: Filter registry by (namespace, name), yields EnvSpec
+def _iter_env_specs_by_ns_name(ns, name):
+    for env_spec in registry.values():
+        if env_spec.namespace == ns and env_spec.name == name:
+            yield env_spec
