@@ -1,4 +1,5 @@
 """Set of functions for logging messages."""
+from __future__ import annotations
 
 import warnings
 
@@ -46,3 +47,9 @@ def error(msg: str, *args: object):
     """Logs an error message if min_level <= ERROR in red on the sys.stderr."""
     if min_level <= ERROR:
         warnings.warn(colorize(f"ERROR: {msg % args}", "red"), stacklevel=3)
+
+# Helper: Filter registry by (namespace, name), yields EnvSpec
+def _iter_env_specs_by_ns_name(ns, name):
+    for env_spec in registry.values():
+        if env_spec.namespace == ns and env_spec.name == name:
+            yield env_spec
