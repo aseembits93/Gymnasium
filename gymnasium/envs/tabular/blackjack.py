@@ -136,7 +136,8 @@ def notake(env_state):
 
 def sum_hand(hand):
     """Returns the total points in a hand."""
-    return sum(hand) + (10 * usable_ace(hand))
+    s = sum(hand)
+    return s + (10 * usable_ace_with_sum(hand, s))
 
 
 def is_bust(hand):
@@ -157,6 +158,11 @@ def is_natural(hand):
         ),
         (jnp.count_nonzero(hand == 10) > 0),
     )
+
+def usable_ace_with_sum(hand, hand_sum):
+    """Checks to see if a hand has a usable ace."""
+    import jax.numpy as jnp
+    return jnp.logical_and((jnp.count_nonzero(hand == 1) > 0), (hand_sum + 10 <= 21))
 
 
 @struct.dataclass
