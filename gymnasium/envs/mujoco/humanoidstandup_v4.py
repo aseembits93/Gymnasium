@@ -39,16 +39,27 @@ class HumanoidStandupEnv(MujocoEnv, utils.EzPickle):
         utils.EzPickle.__init__(self, **kwargs)
 
     def _get_obs(self):
-        data = self.data
+        # Pull all required arrays as local variables to reduce repeated attribute lookups
+        d = self.data
+        # Avoid Python list concatenation; prebuild slices and concatenate only once
+        # (using views to avoid copies until the final .concatenate, which is needed for the API)
+        qpos = d.qpos.flat
+        qvel = d.qvel.flat
+        cinert = d.cinert.flat
+        cvel = d.cvel.flat
+        qfrc_actuator = d.qfrc_actuator.flat
+        cfrc_ext = d.cfrc_ext.flat
+        # Instead of creating lists each call, pass tuple directly
         return np.concatenate(
-            [
-                data.qpos.flat[2:],
-                data.qvel.flat,
-                data.cinert.flat,
-                data.cvel.flat,
-                data.qfrc_actuator.flat,
-                data.cfrc_ext.flat,
-            ]
+            (
+                qpos[2:],
+                qvel,
+                cinert,
+                cvel,
+                qfrc_actuator,
+                cfrc_ext,
+            ),
+            axis=0,
         )
 
     def step(self, a):
