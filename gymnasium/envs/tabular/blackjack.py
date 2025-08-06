@@ -146,7 +146,11 @@ def is_bust(hand):
 
 def score(hand):
     """Returns the score for a hand(0 if a bust)."""
-    return (jnp.logical_not(is_bust(hand))) * sum_hand(hand)
+    s = sum(hand)
+    ace = jnp.logical_and((jnp.count_nonzero(hand == 1) > 0), (s + 10 <= 21))
+    total = s + (10 * ace)
+    bust = total > 21
+    return (jnp.logical_not(bust)) * total
 
 
 def is_natural(hand):
@@ -493,6 +497,17 @@ class BlackjackFunctional(
         """Closes the render state."""
         try:
             import pygame
+            """This module provides a Blackjack functional environment and Gymnasium environment wrapper BlackJackJaxEnv."""
+            
+            
+            PRNGKeyType: TypeAlias = jax.Array
+            """
+    Temporary environment tester function.
+    """
+            print(obs, info)
+            print(obs, reward, terminal, truncated, info)
+
+            exit()
         except ImportError as e:
             raise DependencyNotInstalled(
                 'pygame is not installed, run `pip install "gymnasium[classic_control]"`'
