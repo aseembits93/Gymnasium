@@ -260,30 +260,42 @@ def env_step_passive_checker(env, action):
 
 def _check_render_return(render_mode, render_return):
     """Produces warning if `render_return` doesn't match `render_mode`."""
+    # Fast equality check first
     if render_mode == "human":
         if render_return is not None:
             logger.warn(
                 f"Human rendering should return `None`, got {type(render_return)}"
             )
-    elif render_mode == "rgb_array":
+        return
+
+    # "rgb_array" mode
+    if render_mode == "rgb_array":
         if not isinstance(render_return, np.ndarray):
             logger.warn(
                 f"RGB-array rendering should return a numpy array, got {type(render_return)}"
             )
-        else:
-            if render_return.dtype != np.uint8:
-                logger.warn(
-                    f"RGB-array rendering should return a numpy array with dtype uint8, got {render_return.dtype}"
-                )
-            if render_return.ndim != 3:
-                logger.warn(
-                    f"RGB-array rendering should return a numpy array with three axes, got {render_return.ndim}"
-                )
-            if render_return.ndim == 3 and render_return.shape[2] != 3:
-                logger.warn(
-                    f"RGB-array rendering should return a numpy array in which the last axis has three dimensions, got {render_return.shape[2]}"
-                )
-    elif render_mode == "depth_array":
+            return
+        # Inline all attribute lookups for speed
+        dtype = render_return.dtype
+        ndim = render_return.ndim
+        shape = render_return.shape
+
+        if dtype != np.uint8:
+            logger.warn(
+                f"RGB-array rendering should return a numpy array with dtype uint8, got {dtype}"
+            )
+        if ndim != 3:
+            logger.warn(
+                f"RGB-array rendering should return a numpy array with three axes, got {ndim}"
+            )
+        elif shape[2] != 3:
+            logger.warn(
+                f"RGB-array rendering should return a numpy array in which the last axis has three dimensions, got {shape[2]}"
+            )
+        return
+
+    # "depth_array" mode
+    if render_mode == "depth_array":
         if not isinstance(render_return, np.ndarray):
             logger.warn(
                 f"Depth-array rendering should return a numpy array, got {type(render_return)}"
@@ -292,74 +304,85 @@ def _check_render_return(render_mode, render_return):
             logger.warn(
                 f"Depth-array rendering should return a numpy array with two axes, got {render_return.ndim}"
             )
-    elif render_mode in ["ansi", "ascii"]:
+        return
+
+    # "ansi" or "ascii" mode
+    if render_mode in ("ansi", "ascii"):
         if not isinstance(render_return, str):
             logger.warn(
                 f"ANSI/ASCII rendering should produce a string, got {type(render_return)}"
             )
-    elif render_mode.endswith("_list"):
+        return
+
+    # "*_list" mode
+    if render_mode.endswith("_list"):
         if not isinstance(render_return, list):
             logger.warn(
                 f"Render mode `{render_mode}` should produce a list, got {type(render_return)}"
             )
-        else:
-            base_render_mode = render_mode[: -len("_list")]
-            for item in render_return:
-                _check_render_return(
-                    base_render_mode, item
-                )  # Check that each item of the list matches the base render mode
+            return
+        base_render_mode = render_mode[: -5]  # avoid repeated string computation
+        # Loop variables locally for speed; do not use recursion for empty lists
+        for item in render_return:
+            _check_render_return(base_render_mode, item)
+        return
 
 
 def env_render_passive_checker(env):
     """A passive check of the `Env.render` that the declared render modes/fps in the metadata of the environment is declared."""
-    render_modes = env.metadata.get("render_modes")
+    metadata = env.metadata
+    render_modes = metadata.get("render_modes")
     if render_modes is None:
         logger.warn(
             "No render modes was declared in the environment (env.metadata['render_modes'] is None or not defined), you may have trouble when calling `.render()`."
         )
     else:
+        # Check type only once
         if not isinstance(render_modes, (list, tuple)):
             logger.warn(
                 f"Expects the render_modes to be a sequence (i.e. list, tuple), actual type: {type(render_modes)}"
             )
-        elif not all(isinstance(mode, str) for mode in render_modes):
-            logger.warn(
-                f"Expects all render modes to be strings, actual types: {[type(mode) for mode in render_modes]}"
-            )
+        else:
+            # List comprehension is fastest for type check
+            mode_types = [type(mode) for mode in render_modes if not isinstance(mode, str)]
+            if mode_types:
+                logger.warn(
+                    f"Expects all render modes to be strings, actual types: {mode_types}"
+                )
 
-        render_fps = env.metadata.get("render_fps")
-        # We only require `render_fps` if rendering is actually implemented
-        if len(render_modes) > 0:
+        render_fps = metadata.get("render_fps")
+        # Only require FPS if rendering is implemented (render_modes is a nonempty sequence)
+        has_modes = isinstance(render_modes, (list, tuple)) and len(render_modes) > 0
+        if has_modes:
             if render_fps is None:
                 logger.warn(
                     "No render fps was declared in the environment (env.metadata['render_fps'] is None or not defined), rendering may occur at inconsistent fps."
                 )
             else:
-                if not (
-                    np.issubdtype(type(render_fps), np.integer)
-                    or np.issubdtype(type(render_fps), np.floating)
-                ):
+                rfps_type = type(render_fps)
+                if not (np.issubdtype(rfps_type, np.integer) or np.issubdtype(rfps_type, np.floating)):
                     logger.warn(
-                        f"Expects the `env.metadata['render_fps']` to be an integer or a float, actual type: {type(render_fps)}"
+                        f"Expects the `env.metadata['render_fps']` to be an integer or a float, actual type: {rfps_type}"
                     )
                 else:
-                    assert (
-                        render_fps > 0
-                    ), f"Expects the `env.metadata['render_fps']` to be greater than zero, actual value: {render_fps}"
+                    assert render_fps > 0, (
+                        f"Expects the `env.metadata['render_fps']` to be greater than zero, actual value: {render_fps}"
+                    )
 
         # env.render is now an attribute with default None
-        if len(render_modes) == 0:
-            assert (
-                env.render_mode is None
-            ), f"With no render_modes, expects the Env.render_mode to be None, actual value: {env.render_mode}"
-        else:
-            assert env.render_mode is None or env.render_mode in render_modes, (
+        if isinstance(render_modes, (list, tuple)) and len(render_modes) == 0:
+            assert env.render_mode is None, (
+                f"With no render_modes, expects the Env.render_mode to be None, actual value: {env.render_mode}"
+            )
+        elif isinstance(render_modes, (list, tuple)):
+            assert (env.render_mode is None) or (env.render_mode in render_modes), (
                 "The environment was initialized successfully however with an unsupported render mode. "
                 f"Render mode: {env.render_mode}, modes: {render_modes}"
             )
 
     result = env.render()
-    if env.render_mode is not None:
-        _check_render_return(env.render_mode, result)
+    rm = getattr(env, "render_mode", None)
+    if rm is not None:
+        _check_render_return(rm, result)
 
     return result
