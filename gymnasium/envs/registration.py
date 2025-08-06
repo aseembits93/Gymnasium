@@ -1025,59 +1025,54 @@ def pprint_registry(
         disable_print: Whether to return a string of all the namespaces and environment IDs
             or to print the string to console.
     """
-    # Defaultdict to store environment ids according to namespace.
     namespace_envs: dict[str, list[str]] = defaultdict(list)
     max_justify = float("-inf")
+    regex = re.compile(r":\w+")
 
-    # Find the namespace associated with each environment spec
+    # Pass 1: Populate namespaces and calculate max_justify in one loop
     for env_spec in print_registry.values():
         ns = env_spec.namespace
-
         if ns is None and isinstance(env_spec.entry_point, str):
-            # Use regex to obtain namespace from entrypoints.
-            env_entry_point = re.sub(r":\w+", "", env_spec.entry_point)
+            env_entry_point = regex.sub("", env_spec.entry_point)
             split_entry_point = env_entry_point.split(".")
 
+            # Direct index checks for performance
             if len(split_entry_point) >= 3:
-                # If namespace is of the format:
-                #  - gymnasium.envs.mujoco.ant_v4:AntEnv
-                #  - gymnasium.envs.mujoco:HumanoidEnv
                 ns = split_entry_point[2]
             elif len(split_entry_point) > 1:
-                # If namespace is of the format - shimmy.atari_env
                 ns = split_entry_point[1]
             else:
-                # If namespace cannot be found, default to env name
                 ns = env_spec.name
 
         namespace_envs[ns].append(env_spec.id)
-        max_justify = max(max_justify, len(env_spec.name))
+        # Compute justify as we go
+        name_len = len(env_spec.name)
+        if name_len > max_justify:
+            max_justify = name_len
 
-    # Iterate through each namespace and print environment alphabetically
     output: list[str] = []
+    append_output = output.append  # Local var for faster repeated use
+
     for ns, env_ids in namespace_envs.items():
         # Ignore namespaces to exclude.
         if exclude_namespaces is not None and ns in exclude_namespaces:
             continue
 
-        # Print the namespace
-        namespace_output = f"{'=' * 5} {ns} {'=' * 5}\n"
+        lines = [f"{'=' * 5} {ns} {'=' * 5}"]
+        row: list[str] = []
+        env_ids_sorted = sorted(env_ids)
+        append_row = row.append
 
-        # Reference: https://stackoverflow.com/a/33464001
-        for count, env_id in enumerate(sorted(env_ids), 1):
-            # Print column with justification.
-            namespace_output += env_id.ljust(max_justify) + " "
+        for idx, env_id in enumerate(env_ids_sorted, 1):
+            append_row(env_id.ljust(max_justify))
+            if idx % num_cols == 0 or idx == len(env_ids_sorted):
+                # Join row and start new
+                lines.append(" ".join(row).rstrip(" "))
+                row.clear()
+        append_output('\n'.join(lines))
 
-            # Once all rows printed, switch to new column.
-            if count % num_cols == 0:
-                namespace_output = namespace_output.rstrip(" ")
-
-                if count != len(env_ids):
-                    namespace_output += "\n"
-
-        output.append(namespace_output.rstrip(" "))
-
+    result = "\n".join(output)
     if disable_print:
-        return "\n".join(output)
+        return result
     else:
-        print("\n".join(output))
+        print(result)
