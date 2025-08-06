@@ -151,12 +151,10 @@ def score(hand):
 
 def is_natural(hand):
     """Returns if the hand is a natural blackjack."""
-    return jnp.logical_and(
-        jnp.logical_and(
-            jnp.count_nonzero(hand) == 2, (jnp.count_nonzero(hand == 1) > 0)
-        ),
-        (jnp.count_nonzero(hand == 10) > 0),
-    )
+    num_cards = jnp.count_nonzero(hand)  # total number of nonzero cards
+    has_ace = jnp.any(hand == 1)
+    has_ten = jnp.any(hand == 10)
+    return jnp.logical_and(num_cards == 2, jnp.logical_and(has_ace, has_ten))
 
 
 @struct.dataclass
