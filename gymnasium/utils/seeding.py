@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from gymnasium import error
+"""Set of random number generator functions: seeding, generator, hashing seeds."""
 
 
 def np_random(seed: int | None = None) -> tuple[np.random.Generator, int]:
@@ -41,5 +42,7 @@ def np_random(seed: int | None = None) -> tuple[np.random.Generator, int]:
     rng = RandomNumberGenerator(np.random.PCG64(seed_seq))
     return rng, np_seed
 
+
+RNG = RandomNumberGenerator = np.random.Generator
 
 RNG = RandomNumberGenerator = np.random.Generator

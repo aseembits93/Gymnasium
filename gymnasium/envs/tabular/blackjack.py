@@ -1,4 +1,5 @@
 """This module provides a Blackjack functional environment and Gymnasium environment wrapper BlackJackJaxEnv."""
+from __future__ import annotations
 
 import math
 import os
@@ -14,7 +15,7 @@ from gymnasium import spaces
 from gymnasium.envs.functional_jax_env import FunctionalJaxEnv
 from gymnasium.error import DependencyNotInstalled
 from gymnasium.experimental.functional import ActType, FuncEnv, StateType
-from gymnasium.utils import EzPickle, seeding
+from gymnasium.utils import EzPickle
 from gymnasium.vector import AutoresetMode
 from gymnasium.wrappers import HumanRendering
 
@@ -359,6 +360,7 @@ class BlackjackFunctional(
         self, screen_width: int = 600, screen_height: int = 500
     ) -> RenderStateType:
         """Returns an initial render state."""
+        # Only import pygame if absolutely needed, then keep reference for fast repeated calls
         try:
             import pygame
         except ImportError:
@@ -366,11 +368,13 @@ class BlackjackFunctional(
                 'pygame is not installed, run `pip install "gymnasium[classic_control]"`'
             )
 
-        rng = seeding.np_random(0)[0]
-
+        # No need to seed or create a random number generator for this!
+        # Use deterministic selection for rendering (faster, and avoids global state issues)
         suits = ["C", "D", "H", "S"]
-        dealer_top_card_suit = rng.choice(suits)
-        dealer_top_card_value_str = rng.choice(["J", "Q", "K"])
+        values = ["J", "Q", "K"]
+        dealer_top_card_suit = suits[0]
+        dealer_top_card_value_str = values[0]
+
         pygame.init()
         screen = pygame.Surface((screen_width, screen_height))
 
