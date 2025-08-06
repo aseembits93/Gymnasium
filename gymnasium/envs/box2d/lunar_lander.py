@@ -818,7 +818,7 @@ def heuristic(env, s):
         angle_targ = 0.4  # more than 0.4 radians (22 degrees) is bad
     if angle_targ < -0.4:
         angle_targ = -0.4
-    hover_targ = 0.55 * np.abs(
+    hover_targ = 0.55 * abs(
         s[0]
     )  # target y should be proportional to horizontal offset
 
@@ -832,11 +832,12 @@ def heuristic(env, s):
         )  # override to reduce fall speed, that's all we need after contact
 
     if env.unwrapped.continuous:
-        a = np.array([hover_todo * 20 - 1, -angle_todo * 20])
-        a = np.clip(a, -1, +1)
+        a = [hover_todo * 20 - 1, -angle_todo * 20]
+        a[0] = 1.0 if a[0] > 1.0 else -1.0 if a[0] < -1.0 else a[0]
+        a[1] = 1.0 if a[1] > 1.0 else -1.0 if a[1] < -1.0 else a[1]
     else:
         a = 0
-        if hover_todo > np.abs(angle_todo) and hover_todo > 0.05:
+        if hover_todo > abs(angle_todo) and hover_todo > 0.05:
             a = 2
         elif angle_todo < -0.05:
             a = 3
