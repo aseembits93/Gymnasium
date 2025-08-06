@@ -164,14 +164,14 @@ class AntEnv(MujocoEnv, utils.EzPickle):
         return observation, reward, terminated, False, info
 
     def _get_obs(self):
-        position = self.data.qpos.flat.copy()
-        velocity = self.data.qvel.flat.copy()
+        position = self.data.qpos.ravel()
+        velocity = self.data.qvel.ravel()
 
         if self._exclude_current_positions_from_observation:
             position = position[2:]
 
         if self._use_contact_forces:
-            contact_force = self.contact_forces.flat.copy()
+            contact_force = self.contact_forces.ravel()
             return np.concatenate((position, velocity, contact_force))
         else:
             return np.concatenate((position, velocity))
