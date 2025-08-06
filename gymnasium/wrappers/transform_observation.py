@@ -786,6 +786,12 @@ class DiscretizeObservation(
             for i in range(self.n_dims)
         ]
 
+        # Precompute full bin edges for revert_observation to avoid repeated np.linspace calls
+        self.full_bin_edges = [
+            np.linspace(self.low[i], self.high[i], self.bins[i] + 1)
+            for i in range(self.n_dims)
+        ]
+
         if self.multidiscrete:
             self.observation_space = spaces.MultiDiscrete(self.bins)
         else:
@@ -809,19 +815,21 @@ class DiscretizeObservation(
 
     def revert_observation(self, obs):
         """Reverts discretization. It returns the edges of the bin the discretized observation belongs to."""
+        # Use precomputed bin edges for performance
         if self.multidiscrete:
             indices = np.asarray(obs, dtype=int)
         else:
             indices = self._unflatten_index(obs)
-        lows = []
-        highs = []
-        for i, idx in enumerate(indices):
-            edges = np.linspace(self.low[i], self.high[i], self.bins[i] + 1)
-            lows.append(edges[idx])
-            highs.append(edges[idx + 1])
-        return np.array(lows, dtype=self.env.observation_space.dtype), np.array(
-            highs, dtype=self.env.observation_space.dtype
-        )
+        # Vectorize edge lookup
+        lows = np.empty(self.n_dims, dtype=self.env.observation_space.dtype)
+        highs = np.empty(self.n_dims, dtype=self.env.observation_space.dtype)
+        for i in range(self.n_dims):
+            # Use cached full_bin_edges to avoid repeated linspace computation!
+            edges = self.full_bin_edges[i]
+            idx = indices[i]
+            lows[i] = edges[idx]
+            highs[i] = edges[idx + 1]
+        return lows, highs
 
     def _flatten_indices(self, indices):
         flat_index = 0
