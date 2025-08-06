@@ -93,14 +93,14 @@ def _batch_space_discrete(space: Discrete, n: int = 1):
 
 @batch_space.register(MultiDiscrete)
 def _batch_space_multidiscrete(space: MultiDiscrete, n: int = 1):
-    repeats = tuple([n] + [1] * space.nvec.ndim)
-    low = np.tile(space.start, repeats)
-    high = low + np.tile(space.nvec, repeats) - 1
+    shape = (n,) + space.nvec.shape
+    low = np.broadcast_to(space.start, shape)
+    high = low + np.broadcast_to(space.nvec, shape) - 1
     return Box(
         low=low,
         high=high,
         dtype=space.dtype,
-        seed=deepcopy(space.np_random),
+        seed=space.np_random,
     )
 
 
