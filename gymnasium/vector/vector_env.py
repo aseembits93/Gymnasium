@@ -291,49 +291,48 @@ class VectorEnv(Generic[ObsType, ActType, ArrayType]):
         Returns:
             infos (dict): the (updated) infos of the vectorized environment
         """
+        num_envs = self.num_envs
+
         for key, value in env_info.items():
-            # It is easier for users to access their `final_obs` in the unbatched array of `obs` objects
+            # Fast path for "final_obs"
             if key == "final_obs":
-                if "final_obs" in vector_infos:
-                    array = vector_infos["final_obs"]
-                else:
-                    array = np.full(self.num_envs, fill_value=None, dtype=object)
-                array[env_num] = value
-            # If value is a dictionary, then we apply the `_add_info` recursively.
+                arr = vector_infos.get("final_obs")
+                if arr is None:
+                    arr = np.full(num_envs, None, dtype=object)
+                    vector_infos["final_obs"] = arr
+                arr[env_num] = value
+                mask_key = "_final_obs"
             elif isinstance(value, dict):
-                array = self._add_info(vector_infos.get(key, {}), value, env_num)
-            # Otherwise, we are a base case to group the data
+                nested = vector_infos.get(key)
+                if nested is None:
+                    nested = {}
+                # recursion, keep reference updated just in case
+                vector_infos[key] = self._add_info(nested, value, env_num)
+                mask_key = f"_{key}"
+                # After recursive insert, just set mask as before
             else:
-                # If the key doesn't exist in the vector infos, then we can create an array of that batch type
-                if key not in vector_infos:
-                    if type(value) in [int, float, bool] or issubclass(
-                        type(value), np.number
-                    ):
-                        array = np.zeros(self.num_envs, dtype=type(value))
-                    elif isinstance(value, np.ndarray):
-                        # We assume that all instances of the np.array info are of the same shape
-                        array = np.zeros(
-                            (self.num_envs, *value.shape), dtype=value.dtype
-                        )
-                    else:
-                        # For unknown objects, we use a Numpy object array
-                        array = np.full(self.num_envs, fill_value=None, dtype=object)
-                # Otherwise, just use the array that already exists
+                # Fast-paths for constructing the array, minimize type checks
+                if key in vector_infos:
+                    arr = vector_infos[key]
                 else:
-                    array = vector_infos[key]
+                    val_type = type(value)
+                    if val_type in (int, float, bool) or isinstance(value, np.number):
+                        arr = np.zeros(num_envs, dtype=val_type)
+                    elif isinstance(value, np.ndarray):
+                        arr = np.zeros((num_envs, *value.shape), dtype=value.dtype)
+                    else:
+                        arr = np.full(num_envs, None, dtype=object)
+                    vector_infos[key] = arr
+                arr[env_num] = value
+                mask_key = f"_{key}"
 
-                # Assign the data in the `env_num` position
-                #   We only want to run this for the base-case data (not recursive data forcing the ugly function structure)
-                array[env_num] = value
+            # Efficient (single) mask handling
+            mask = vector_infos.get(mask_key)
+            if mask is None:
+                mask = np.zeros(num_envs, dtype=bool)
+                vector_infos[mask_key] = mask
+            mask[env_num] = True
 
-            # Get the array mask and if it doesn't already exist then create a zero bool array
-            array_mask = vector_infos.get(
-                f"_{key}", np.zeros(self.num_envs, dtype=np.bool_)
-            )
-            array_mask[env_num] = True
-
-            # Update the vector info with the updated data and mask information
-            vector_infos[key], vector_infos[f"_{key}"] = array, array_mask
         return vector_infos
 
     def __del__(self):
