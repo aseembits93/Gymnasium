@@ -31,7 +31,7 @@ def array_short_repr(arr: NDArray[Any]) -> str:
 
 def is_float_integer(var: Any) -> bool:
     """Checks if a scalar variable is an integer or float (does not include bool)."""
-    return np.issubdtype(type(var), np.integer) or np.issubdtype(type(var), np.floating)
+    return type(var) is int or type(var) is float
 
 
 class Box(Space[NDArray[Any]]):
