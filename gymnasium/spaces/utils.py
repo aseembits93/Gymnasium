@@ -376,17 +376,21 @@ def _unflatten_graph(space: Graph, x: GraphInstance) -> GraphInstance:
     nodes and edges in the graph.
     """
 
-    def _graph_unflatten(unflatten_space, unflatten_x):
-        result = None
-        if unflatten_space is not None and unflatten_x is not None:
-            if isinstance(unflatten_space, Box):
-                result = unflatten_x.reshape(-1, *unflatten_space.shape)
-            elif isinstance(unflatten_space, Discrete):
-                result = np.asarray(np.nonzero(unflatten_x))[-1, :]
-        return result
+    # Unflatten nodes
+    nodes = None
+    if space.node_space is not None and x.nodes is not None:
+        if isinstance(space.node_space, Box):
+            nodes = x.nodes.reshape(-1, *space.node_space.shape)
+        elif isinstance(space.node_space, Discrete):
+            nodes = np.asarray(np.nonzero(x.nodes))[-1, :]
 
-    nodes = _graph_unflatten(space.node_space, x.nodes)
-    edges = _graph_unflatten(space.edge_space, x.edges)
+    # Unflatten edges
+    edges = None
+    if space.edge_space is not None and x.edges is not None:
+        if isinstance(space.edge_space, Box):
+            edges = x.edges.reshape(-1, *space.edge_space.shape)
+        elif isinstance(space.edge_space, Discrete):
+            edges = np.asarray(np.nonzero(x.edges))[-1, :]
 
     return GraphInstance(nodes, edges, x.edge_links)
 
