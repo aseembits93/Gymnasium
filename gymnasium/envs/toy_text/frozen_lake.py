@@ -11,6 +11,7 @@ from gymnasium import Env, spaces, utils
 from gymnasium.envs.toy_text.utils import categorical_sample
 from gymnasium.error import DependencyNotInstalled
 from gymnasium.utils import seeding
+from collections import deque
 
 
 LEFT = 0
@@ -35,22 +36,23 @@ MAPS = {
 
 # DFS to check that it's a valid path.
 def is_valid(board: list[list[str]], max_size: int) -> bool:
-    frontier, discovered = [], set()
+    frontier = deque()
+    discovered = set()
+    directions = [(1, 0), (0, 1), (-1, 0), (0, -1)]
     frontier.append((0, 0))
+    discovered.add((0, 0))
     while frontier:
         r, c = frontier.pop()
-        if not (r, c) in discovered:
-            discovered.add((r, c))
-            directions = [(1, 0), (0, 1), (-1, 0), (0, -1)]
-            for x, y in directions:
-                r_new = r + x
-                c_new = c + y
-                if r_new < 0 or r_new >= max_size or c_new < 0 or c_new >= max_size:
-                    continue
+        for x, y in directions:
+            r_new = r + x
+            c_new = c + y
+            if 0 <= r_new < max_size and 0 <= c_new < max_size:
                 if board[r_new][c_new] == "G":
                     return True
                 if board[r_new][c_new] != "H":
-                    frontier.append((r_new, c_new))
+                    if (r_new, c_new) not in discovered:
+                        discovered.add((r_new, c_new))
+                        frontier.append((r_new, c_new))
     return False
 
 
