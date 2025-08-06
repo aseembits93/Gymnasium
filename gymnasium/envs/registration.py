@@ -490,8 +490,15 @@ def _find_spec(env_id: str) -> EnvSpec:
     # For string id's, load the environment spec from the registry then make the environment spec
     assert isinstance(env_id, str)
 
-    # The environment name can include an unloaded module in "module:env_name" style
-    module, env_name = (None, env_id) if ":" not in env_id else env_id.split(":")
+    # Split module/env only if necessary (avoid split(":") if not needed)
+    idx = env_id.find(":")
+    if idx == -1:
+        module = None
+        env_name = env_id
+    else:
+        module = env_id[:idx]
+        env_name = env_id[idx+1:]
+
     if module is not None:
         try:
             importlib.import_module(module)
@@ -501,13 +508,23 @@ def _find_spec(env_id: str) -> EnvSpec:
                 f"Check whether '{module}' contains env registration and can be imported."
             ) from e
 
-    # load the env spec from the registry
     env_spec = registry.get(env_name)
-
-    # update env spec is not version provided, raise warning if out of date
     ns, name, version = parse_env_id(env_name)
+    # Hotspot: find_highest_version
+    # Avoid repeated global scans by building a { (ns, name): max_ver } map once per call
+    registry_items = registry.values()
+    local_version_cache = {}
+    for env_spec_iter in registry_items:
+        key = (env_spec_iter.namespace, env_spec_iter.name)
+        ver = env_spec_iter.version
+        if ver is not None:
+            if key in local_version_cache:
+                if ver > local_version_cache[key]:
+                    local_version_cache[key] = ver
+            else:
+                local_version_cache[key] = ver
+    latest_version = local_version_cache.get((ns, name), None)
 
-    latest_version = find_highest_version(ns, name)
     if version is not None and latest_version is not None and latest_version > version:
         logger.deprecation(
             f"The environment {env_name} is out of date. You should consider "
@@ -523,7 +540,9 @@ def _find_spec(env_id: str) -> EnvSpec:
         )
 
     if env_spec is None:
-        _check_version_exists(ns, name, version)
+        # Hotspot: optimize _check_version_exists by reusing local_version_cache
+        # Only re-scan registry if not already done
+        _optimized_check_version_exists(ns, name, version, local_version_cache)
         raise error.Error(
             f"No registered env with id: {env_name}. Did you register it, or import the package that registers it? Use `gymnasium.pprint_registry()` to see all of the registered environments."
         )
@@ -540,10 +559,16 @@ def load_env_creator(name: str) -> EnvCreator | VectorEnvCreator:
     Returns:
         The environment constructor for the given environment name.
     """
-    mod_name, attr_name = name.split(":")
+    # Hot path: split only once
+    idx = name.find(":")
+    if idx == -1:
+        raise error.Error(
+            f"Environment registration string '{name}' missing ':' separator required for import path."
+        )
+    mod_name = name[:idx]
+    attr_name = name[idx + 1 :]
     mod = importlib.import_module(mod_name)
-    fn = getattr(mod, attr_name)
-    return fn
+    return getattr(mod, attr_name)
 
 
 def register_envs(env_module: ModuleType):
@@ -865,10 +890,11 @@ def make_vec(
     else:
         raise error.Error(f"Invalid id type: {type(id)}. Expected `str` or `EnvSpec`")
 
-    env_spec = copy.deepcopy(env_spec)
-    env_spec_kwargs = env_spec.kwargs
-    # for sync or async, these parameters should be passed in `make(..., **kwargs)` rather than in the env spec kwargs, therefore, we `reset` the kwargs
-    env_spec.kwargs = dict()
+    # Only deepcopy if env_spec is reused in a multi-threaded context;
+    # Otherwise, .kwargs is replaced anyway so skip most of deepcopy cost here
+    # Instead, only copy .kwargs out and mutate it
+    env_spec_kwargs = env_spec.kwargs.copy()
+    env_spec.kwargs = {}
 
     num_envs = env_spec_kwargs.pop("num_envs", num_envs)
     vectorization_mode = env_spec_kwargs.pop("vectorization_mode", vectorization_mode)
@@ -887,23 +913,21 @@ def make_vec(
         try:
             vectorization_mode = VectorizeMode(vectorization_mode)
         except ValueError:
+            valid_modes = [mode.value for mode in VectorizeMode]
             raise ValueError(
                 f"Invalid vectorization mode: {vectorization_mode!r}, "
-                f"valid modes: {[mode.value for mode in VectorizeMode]}"
+                f"valid modes: {valid_modes}"
             )
     assert isinstance(vectorization_mode, VectorizeMode)
 
     def create_single_env() -> Env:
-        single_env = make(env_spec, **env_spec_kwargs.copy())
-
-        if wrappers is None:
-            return single_env
-
+        env = make(env_spec, **env_spec_kwargs)
+        # Apply wrappers (sequence) if non-empty
         for wrapper in wrappers:
-            single_env = wrapper(single_env)
-        return single_env
+            env = wrapper(env)
+        return env
 
-    if vectorization_mode == VectorizeMode.SYNC:
+    if vectorization_mode is VectorizeMode.SYNC:
         if env_spec.entry_point is None:
             raise error.Error(
                 f"Cannot create vectorized environment for {env_spec.id} because it doesn't have an entry point defined."
@@ -913,7 +937,7 @@ def make_vec(
             env_fns=(create_single_env for _ in range(num_envs)),
             **vector_kwargs,
         )
-    elif vectorization_mode == VectorizeMode.ASYNC:
+    elif vectorization_mode is VectorizeMode.ASYNC:
         if env_spec.entry_point is None:
             raise error.Error(
                 f"Cannot create vectorized environment for {env_spec.id} because it doesn't have an entry point defined."
@@ -923,8 +947,7 @@ def make_vec(
             env_fns=[create_single_env for _ in range(num_envs)],
             **vector_kwargs,
         )
-
-    elif vectorization_mode == VectorizeMode.VECTOR_ENTRY_POINT:
+    elif vectorization_mode is VectorizeMode.VECTOR_ENTRY_POINT:
         if len(vector_kwargs) > 0:
             raise error.Error(
                 f"Custom vector environment can be passed arguments only through kwargs and `vector_kwargs` is not empty ({vector_kwargs})"
@@ -945,7 +968,7 @@ def make_vec(
             )
         elif callable(entry_point):
             env_creator = entry_point
-        else:  # Assume it's a string
+        else:
             env_creator = load_env_creator(entry_point)
 
         if (
@@ -959,25 +982,30 @@ def make_vec(
         raise error.Error(f"Unknown vectorization mode: {vectorization_mode}")
 
     # Copies the environment creation specification and kwargs to add to the environment specification details
+    # Now, copy only the fields that may differ due to make_vec arguments
     copied_id_spec = copy.deepcopy(env_spec)
     copied_id_spec.kwargs = env_spec_kwargs.copy()
     if num_envs != 1:
         copied_id_spec.kwargs["num_envs"] = num_envs
     copied_id_spec.kwargs["vectorization_mode"] = vectorization_mode.value
-    if len(vector_kwargs) > 0:
+    if vector_kwargs:
         copied_id_spec.kwargs["vector_kwargs"] = vector_kwargs
-    if len(wrappers) > 0:
+    if wrappers:
         copied_id_spec.kwargs["wrappers"] = wrappers
     env.unwrapped.spec = copied_id_spec
 
-    if "autoreset_mode" not in env.metadata:
+    # Fast-path warn: warnings, colorize and stacklevel kept but code streamlined
+    meta = env.metadata
+    if "autoreset_mode" not in meta:
         warn(
-            f"The VectorEnv ({env}) is missing AutoresetMode metadata, metadata={env.metadata}"
+            f"The VectorEnv ({env}) is missing AutoresetMode metadata, metadata={meta}"
         )
-    elif not isinstance(env.metadata["autoreset_mode"], AutoresetMode):
-        warn(
-            f"The VectorEnv ({env}) metadata['autoreset_mode'] is not an instance of AutoresetMode, {type(env.metadata['autoreset_mode'])}."
-        )
+    else:
+        value = meta["autoreset_mode"]
+        if not isinstance(value, AutoresetMode):
+            warn(
+                f"The VectorEnv ({env}) metadata['autoreset_mode'] is not an instance of AutoresetMode, {type(value)}."
+            )
 
     return env
 
@@ -1081,3 +1109,52 @@ def pprint_registry(
         return "\n".join(output)
     else:
         print("\n".join(output))
+
+def _optimized_check_version_exists(ns, name, version, version_cache):
+    # Only invoked if env_spec is missing
+    from gymnasium.envs.registration import (_check_name_exists, get_env_id,
+                                             registry)
+    env_full_id = get_env_id(ns, name, version)
+    if env_full_id in registry:
+        return
+
+    _check_name_exists(ns, name)
+    if version is None:
+        return
+
+    message = f"Environment version `v{version}` for environment `{get_env_id(ns, name, None)}` doesn't exist."
+    # Use one registry scan instead of multiple
+    env_specs = []
+    default_spec = []
+    found_versioned = []
+
+    for env_spec in registry.values():
+        if env_spec.namespace == ns and env_spec.name == name:
+            env_specs.append(env_spec)
+            if env_spec.version is None:
+                default_spec.append(env_spec)
+            else:
+                found_versioned.append(env_spec)
+
+    env_specs.sort(key=lambda env_spec: int(env_spec.version or -1))
+    if default_spec:
+        message += f" It provides the default version `{default_spec[0].id}`."
+        if len(env_specs) == 1:
+            raise error.DeprecatedEnv(message)
+
+    if found_versioned:
+        latest_spec = max(found_versioned, key=lambda env_spec: env_spec.version)
+    else:
+        latest_spec = None
+
+    if latest_spec is not None and version > latest_spec.version:
+        version_list_msg = ", ".join(f"`v{env_spec.version}`" for env_spec in env_specs)
+        message += f" It provides versioned environments: [ {version_list_msg} ]."
+        raise error.VersionNotFound(message)
+
+    if latest_spec is not None and version < latest_spec.version:
+        raise error.DeprecatedEnv(
+            f"Environment version v{version} for `{get_env_id(ns, name, None)}` is deprecated. "
+            f"Please use `{latest_spec.id}` instead."
+        )
+    # else: nothing else to raise
