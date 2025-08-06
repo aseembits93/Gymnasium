@@ -129,6 +129,12 @@ class MountainCarEnv(gym.Env):
         self.action_space = spaces.Discrete(3)
         self.observation_space = spaces.Box(self.low, self.high, dtype=np.float32)
 
+        self._track_res = 100  # Track resolution for rendering
+
+        # Cache track profile and scale so we can reuse across renders
+        self._render_geom_initialized = False
+        self._car_base_shape = [(-20, 0), (-20, 20), (20, 20), (20, 0)]  # carwidth=40, carheight=20
+
     def step(self, action: int):
         assert self.action_space.contains(
             action
@@ -170,6 +176,7 @@ class MountainCarEnv(gym.Env):
         return np.array(self.state, dtype=np.float32), {}
 
     def _height(self, xs):
+        # `xs` is usually an ndarray or float
         return np.sin(3 * xs) * 0.45 + 0.55
 
     def render(self):
@@ -190,6 +197,10 @@ class MountainCarEnv(gym.Env):
                 'pygame is not installed, run `pip install "gymnasium[classic_control]"`'
             ) from e
 
+        # Only initialize and cache static/geometry objects once
+        if not self._render_geom_initialized:
+            self._initialize_render_geometry()
+
         if self.screen is None:
             pygame.init()
             if self.render_mode == "human":
@@ -197,84 +208,89 @@ class MountainCarEnv(gym.Env):
                 self.screen = pygame.display.set_mode(
                     (self.screen_width, self.screen_height)
                 )
-            else:  # mode in "rgb_array"
+            else:
                 self.screen = pygame.Surface((self.screen_width, self.screen_height))
+
         if self.clock is None:
             self.clock = pygame.time.Clock()
 
-        world_width = self.max_position - self.min_position
-        scale = self.screen_width / world_width
-        carwidth = 40
-        carheight = 20
-
-        self.surf = pygame.Surface((self.screen_width, self.screen_height))
-        self.surf.fill((255, 255, 255))
+        # Instead of recreating surfaces every time, always draw on a cached one
+        if not hasattr(self, "_surf") or self._surf is None:
+            self._surf = pygame.Surface((self.screen_width, self.screen_height))
+        surf = self._surf
+        surf.fill((255, 255, 255))
 
         pos = self.state[0]
 
-        xs = np.linspace(self.min_position, self.max_position, 100)
-        ys = self._height(xs)
-        xys = list(zip((xs - self.min_position) * scale, ys * scale))
+        # Use precomputed XYS for most of the track
+        xys = self._cached_xys
 
-        pygame.draw.aalines(self.surf, points=xys, closed=False, color=(0, 0, 0))
+        pygame.draw.aalines(surf, points=xys.tolist(), closed=False, color=(0, 0, 0))
 
         clearance = 10
+        carwidth = 40
+        carheight = 20
 
-        l, r, t, b = -carwidth / 2, carwidth / 2, carheight, 0
+        # For car body polygon, rotate and translate cached base points using math (not pygame.Vector2 objects, which are slow for this)
+        theta = math.cos(3 * pos)
+
+        # Compute height at car position only once
+        car_h = float(self._height(pos)) * self._scale
+        car_x = (pos - self.min_position) * self._scale
+        cos_theta = math.cos(theta)
+        sin_theta = math.sin(theta)
+
         coords = []
-        for c in [(l, b), (l, t), (r, t), (r, b)]:
-            c = pygame.math.Vector2(c).rotate_rad(math.cos(3 * pos))
-            coords.append(
-                (
-                    c[0] + (pos - self.min_position) * scale,
-                    c[1] + clearance + self._height(pos) * scale,
-                )
-            )
+        for x0, y0 in self._car_base_shape:
+            # Affine rotation, followed by translation
+            x_rot = x0 * cos_theta - y0 * sin_theta
+            y_rot = x0 * sin_theta + y0 * cos_theta
+            coords.append((
+                x_rot + car_x,
+                y_rot + clearance + car_h,
+            ))
 
-        gfxdraw.aapolygon(self.surf, coords, (0, 0, 0))
-        gfxdraw.filled_polygon(self.surf, coords, (0, 0, 0))
+        gfxdraw.aapolygon(surf, coords, (0, 0, 0))
+        gfxdraw.filled_polygon(surf, coords, (0, 0, 0))
 
-        for c in [(carwidth / 4, 0), (-carwidth / 4, 0)]:
-            c = pygame.math.Vector2(c).rotate_rad(math.cos(3 * pos))
+        # Wheels: precompute values, not per render
+        wheel_rad = int(carheight / 2.5)
+        for wx in [carwidth / 4, -carwidth / 4]:
+            x_rot = wx * cos_theta
+            y_rot = wx * sin_theta
             wheel = (
-                int(c[0] + (pos - self.min_position) * scale),
-                int(c[1] + clearance + self._height(pos) * scale),
+                int(x_rot + car_x),
+                int(y_rot + clearance + car_h)
             )
-
             gfxdraw.aacircle(
-                self.surf, wheel[0], wheel[1], int(carheight / 2.5), (128, 128, 128)
+                surf, wheel[0], wheel[1], wheel_rad, (128, 128, 128)
             )
             gfxdraw.filled_circle(
-                self.surf, wheel[0], wheel[1], int(carheight / 2.5), (128, 128, 128)
+                surf, wheel[0], wheel[1], wheel_rad, (128, 128, 128)
             )
 
-        flagx = int((self.goal_position - self.min_position) * scale)
-        flagy1 = int(self._height(self.goal_position) * scale)
+        # Flag
+        flagx = int((self.goal_position - self.min_position) * self._scale)
+        flagy1 = int(float(self._height(self.goal_position)) * self._scale)
         flagy2 = flagy1 + 50
-        gfxdraw.vline(self.surf, flagx, flagy1, flagy2, (0, 0, 0))
+        gfxdraw.vline(surf, flagx, flagy1, flagy2, (0, 0, 0))
+        flag_tri = [(flagx, flagy2), (flagx, flagy2 - 10), (flagx + 25, flagy2 - 5)]
+        gfxdraw.aapolygon(surf, flag_tri, (204, 204, 0))
+        gfxdraw.filled_polygon(surf, flag_tri, (204, 204, 0))
 
-        gfxdraw.aapolygon(
-            self.surf,
-            [(flagx, flagy2), (flagx, flagy2 - 10), (flagx + 25, flagy2 - 5)],
-            (204, 204, 0),
-        )
-        gfxdraw.filled_polygon(
-            self.surf,
-            [(flagx, flagy2), (flagx, flagy2 - 10), (flagx + 25, flagy2 - 5)],
-            (204, 204, 0),
-        )
-
-        self.surf = pygame.transform.flip(self.surf, False, True)
-        self.screen.blit(self.surf, (0, 0))
+        # Only perform flip/transpose as needed for rgb_array
         if self.render_mode == "human":
+            self.screen.blit(surf, (0, 0))
             pygame.event.pump()
             self.clock.tick(self.metadata["render_fps"])
             pygame.display.flip()
-
         elif self.render_mode == "rgb_array":
-            return np.transpose(
-                np.array(pygame.surfarray.pixels3d(self.screen)), axes=(1, 0, 2)
-            )
+            # Avoid double array conversion and transpose, use blit only as needed
+            # We flip vertically by reversing lines (much faster than pygame.transform.flip)
+            self.screen.blit(surf, (0, 0))
+            arr = pygame.surfarray.pixels3d(self.screen)
+            # Fastest vertical flip: np.flip(arr, axis=1) operates inplace view
+            return np.transpose(np.flip(arr, axis=1), axes=(1, 0, 2)).copy()  # extra copy guards against memory leaks
 
     def get_keys_to_action(self):
         # Control with left and right arrow keys.
@@ -287,3 +303,20 @@ class MountainCarEnv(gym.Env):
             pygame.display.quit()
             pygame.quit()
             self.isopen = False
+
+    def _initialize_render_geometry(self):
+        # Called once when render assets (track, scales, precomputed quantities) can be reused
+        world_width = self.max_position - self.min_position
+        scale = self.screen_width / world_width
+        self._scale = scale
+
+        # Precompute track geometry/profile
+        xs = np.linspace(self.min_position, self.max_position, self._track_res)
+        ys = self._height(xs)
+        xys = np.empty((self._track_res, 2))
+        xys[:, 0] = (xs - self.min_position) * scale
+        xys[:, 1] = ys * scale
+        self._cached_xs = xs
+        self._cached_ys = ys
+        self._cached_xys = xys
+        self._render_geom_initialized = True
