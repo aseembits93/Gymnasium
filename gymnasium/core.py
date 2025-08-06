@@ -271,7 +271,10 @@ class Env(Generic[ObsType, ActType]):
 
     def get_wrapper_attr(self, name: str) -> Any:
         """Gets the attribute `name` from the environment."""
-        return getattr(self, name)
+        try:
+            return self.__dict__[name]
+        except KeyError:
+            return getattr(self, name)
 
     def set_wrapper_attr(self, name: str, value: Any, *, force: bool = True) -> bool:
         """Sets the attribute `name` on the environment with `value`, see `Wrapper.set_wrapper_attr` for more info."""
