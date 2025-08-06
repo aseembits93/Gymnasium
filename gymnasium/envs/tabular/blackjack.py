@@ -58,6 +58,7 @@ def draw_hand(key, hand):
     return hand, key
 
 
+@jax.jit
 def draw_card(key, hand, index):
     """Draws a new card and adds it to a hand."""
     new_card, key = random_card(key)
