@@ -220,7 +220,7 @@ def _batch_differing_spaces_multi_discrete(spaces: list[MultiDiscrete]):
         low=np.array([space.start for space in spaces]),
         high=np.array([space.start + space.nvec for space in spaces]) - 1,
         dtype=spaces[0].dtype,
-        seed=deepcopy(spaces[0].np_random),
+        seed=None,
     )
 
 
