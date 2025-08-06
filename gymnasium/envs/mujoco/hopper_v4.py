@@ -94,7 +94,7 @@ class HopperEnv(MujocoEnv, utils.EzPickle):
         )
 
     def control_cost(self, action):
-        control_cost = self._ctrl_cost_weight * np.sum(np.square(action))
+        control_cost = self._ctrl_cost_weight * np.dot(action, action)
         return control_cost
 
     @property
