@@ -393,9 +393,8 @@ def _unflatten_graph(space: Graph, x: GraphInstance) -> GraphInstance:
 
 @unflatten.register(Text)
 def _unflatten_text(space: Text, x: NDArray[np.int32]) -> str:
-    return "".join(
-        [space.character_list[val] for val in x if val < len(space.character_set)]
-    )
+    valid_indices = x[x < len(space.character_set)]
+    return "".join(map(space.character_list.__getitem__, valid_indices))
 
 
 @unflatten.register(Sequence)
