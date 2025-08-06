@@ -205,25 +205,6 @@ def _flatten_dict(space: Dict, x: dict[str, Any]) -> dict[str, Any] | NDArray[An
 def _flatten_graph(space: Graph, x: GraphInstance) -> GraphInstance:
     """We're not using ``.unflatten()`` for :class:`Box` and :class:`Discrete` because a graph is not a homogeneous space, see `.flatten` docstring."""
 
-    def _graph_unflatten(
-        unflatten_space: Discrete | Box | None,
-        unflatten_x: NDArray[Any] | None,
-    ) -> NDArray[Any] | None:
-        ret = None
-        if unflatten_space is not None and unflatten_x is not None:
-            if isinstance(unflatten_space, Box):
-                ret = unflatten_x.reshape(unflatten_x.shape[0], -1)
-            else:
-                assert isinstance(unflatten_space, Discrete)
-                ret = np.zeros(
-                    (unflatten_x.shape[0], unflatten_space.n - unflatten_space.start),
-                    dtype=unflatten_space.dtype,
-                )
-                ret[
-                    np.arange(unflatten_x.shape[0]), unflatten_x - unflatten_space.start
-                ] = 1
-        return ret
-
     nodes = _graph_unflatten(space.node_space, x.nodes)
     assert nodes is not None
     edges = _graph_unflatten(space.edge_space, x.edges)
@@ -668,3 +649,23 @@ def _is_space_sequence_dtype_shape_equiv(space_1: Sequence, space_2):
         and space_1.stack is space_2.stack
         and is_space_dtype_shape_equiv(space_1.feature_space, space_2.feature_space)
     )
+
+
+def _graph_unflatten(
+    unflatten_space: Discrete | Box | None,
+    unflatten_x: NDArray[Any] | None,
+) -> NDArray[Any] | None:
+    ret = None
+    if unflatten_space is not None and unflatten_x is not None:
+        if isinstance(unflatten_space, Box):
+            ret = unflatten_x.reshape(unflatten_x.shape[0], -1)
+        else:
+            assert isinstance(unflatten_space, Discrete)
+            ret = np.zeros(
+                (unflatten_x.shape[0], unflatten_space.n - unflatten_space.start),
+                dtype=unflatten_space.dtype,
+            )
+            ret[
+                np.arange(unflatten_x.shape[0]), unflatten_x - unflatten_space.start
+            ] = 1
+    return ret
