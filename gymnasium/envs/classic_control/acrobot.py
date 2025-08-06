@@ -202,23 +202,22 @@ class AcrobotEnv(Env):
         s = self.state
         assert s is not None, "Call reset before using AcrobotEnv object."
         torque = self.AVAIL_TORQUE[a]
-
         # Add noise to the force action
-        if self.torque_noise_max > 0:
-            torque += self.np_random.uniform(
-                -self.torque_noise_max, self.torque_noise_max
-            )
+        noise = self.np_random.uniform(
+            -self.torque_noise_max, self.torque_noise_max
+        ) if self.torque_noise_max > 0 else 0.0
+        torque += noise
+        # Avoid np.append for speed, also avoid allocating s_augmented
+        s_augmented = np.empty(5, dtype=np.float64)
+        s_augmented[:4] = s
+        s_augmented[4] = torque
 
-        # Now, augment the state with our force action so it can be passed to
-        # _dsdt
-        s_augmented = np.append(s, torque)
+        ns = rk4_fast(self._dsdt, s_augmented, self.dt)
 
-        ns = rk4(self._dsdt, s_augmented, [0, self.dt])
-
-        ns[0] = wrap(ns[0], -pi, pi)
-        ns[1] = wrap(ns[1], -pi, pi)
-        ns[2] = bound(ns[2], -self.MAX_VEL_1, self.MAX_VEL_1)
-        ns[3] = bound(ns[3], -self.MAX_VEL_2, self.MAX_VEL_2)
+        ns[0] = wrap_fast(ns[0], -pi, pi)
+        ns[1] = wrap_fast(ns[1], -pi, pi)
+        ns[2] = bound_fast(ns[2], -self.MAX_VEL_1, self.MAX_VEL_1)
+        ns[3] = bound_fast(ns[3], -self.MAX_VEL_2, self.MAX_VEL_2)
         self.state = ns
         terminated = self._terminal()
         reward = -1.0 if not terminated else 0.0
@@ -231,14 +230,18 @@ class AcrobotEnv(Env):
     def _get_ob(self):
         s = self.state
         assert s is not None, "Call reset before using AcrobotEnv object."
+        # Precompute s[0] + s[1] only once
+        s0, s1, s2, s3 = s
         return np.array(
-            [cos(s[0]), sin(s[0]), cos(s[1]), sin(s[1]), s[2], s[3]], dtype=np.float32
+            [cos(s0), sin(s0), cos(s1), sin(s1), s2, s3], dtype=np.float32
         )
 
     def _terminal(self):
         s = self.state
         assert s is not None, "Call reset before using AcrobotEnv object."
-        return bool(-cos(s[0]) - cos(s[1] + s[0]) > 1.0)
+        # Precompute s[0] + s[1]
+        s0, s1 = s[0], s[1]
+        return bool(-cos(s0) - cos(s0 + s1) > 1.0)
 
     def _dsdt(self, s_augmented):
         m1 = self.LINK_MASS_1
@@ -318,17 +321,17 @@ class AcrobotEnv(Env):
         if s is None:
             return None
 
-        p1 = [
-            -self.LINK_LENGTH_1 * cos(s[0]) * scale,
-            self.LINK_LENGTH_1 * sin(s[0]) * scale,
-        ]
+        c0 = cos(s[0])
+        s0 = sin(s[0])
+        c01 = cos(s[0] + s[1])
+        s01 = sin(s[0] + s[1])
 
-        p2 = [
-            p1[0] - self.LINK_LENGTH_2 * cos(s[0] + s[1]) * scale,
-            p1[1] + self.LINK_LENGTH_2 * sin(s[0] + s[1]) * scale,
-        ]
+        p1x = -self.LINK_LENGTH_1 * c0 * scale
+        p1y =  self.LINK_LENGTH_1 * s0 * scale
+        p2x = p1x - self.LINK_LENGTH_2 * c01 * scale
+        p2y = p1y + self.LINK_LENGTH_2 * s01 * scale
 
-        xys = np.array([[0, 0], p1, p2])[:, ::-1]
+        xys = np.array([[0, 0], [p1x, p1y], [p2x, p2y]])[:, ::-1]
         thetas = [s[0] - pi / 2, s[0] + s[1] - pi / 2]
         link_lengths = [self.LINK_LENGTH_1 * scale, self.LINK_LENGTH_2 * scale]
 
@@ -371,6 +374,7 @@ class AcrobotEnv(Env):
     def close(self):
         if self.screen is not None:
             import pygame
+            """classic Acrobot task"""
 
             pygame.display.quit()
             pygame.quit()
@@ -464,3 +468,27 @@ def rk4(derivs, y0, t):
         yout[i + 1] = y0 + dt / 6.0 * (k1 + 2 * k2 + 2 * k3 + k4)
     # We only care about the final timestep and we cleave off action value which will be zero
     return yout[-1][:4]
+
+
+def wrap_fast(x, m, M):
+    """Faster scalar wrap: m <= x <= M, wrap x around interval."""
+    diff = M - m
+    # Equivalent to while, but branchless for scalars
+    x = (x - m) % diff + m
+    return x
+
+def bound_fast(x, m, M):
+    """Bound x between m and M (scalars)."""
+    return m if x < m else (M if x > M else x)
+
+def rk4_fast(derivs, y0, dt):
+    """
+    Optimized Runge-Kutta for two-timestep integration with fixed dt.
+    Only cares about yout[1][:4].
+    """
+    k1 = np.asarray(derivs(y0))
+    k2 = np.asarray(derivs(y0 + 0.5 * dt * k1))
+    k3 = np.asarray(derivs(y0 + 0.5 * dt * k2))
+    k4 = np.asarray(derivs(y0 + dt * k3))
+    yfinal = y0 + dt / 6.0 * (k1 + 2*k2 + 2*k3 + k4)
+    return yfinal[:4]
