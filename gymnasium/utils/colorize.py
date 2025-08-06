@@ -30,12 +30,10 @@ def colorize(
     Returns:
         Colourised string
     """
-    attr = []
     num = color2num[color]
     if highlight:
         num += 10
-    attr.append(str(num))
     if bold:
-        attr.append("1")
-    attrs = ";".join(attr)
-    return f"\x1b[{attrs}m{string}\x1b[0m"
+        return f"\x1b[{num};1m{string}\x1b[0m"
+    else:
+        return f"\x1b[{num}m{string}\x1b[0m"
