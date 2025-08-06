@@ -283,10 +283,7 @@ class TaxiEnv(Env):
         fickle_passenger: bool = False,
     ):
         self.desc = np.asarray(MAP, dtype="c")
-
-        self.locs = locs = [(0, 0), (0, 4), (4, 0), (4, 3)]
-        self.locs_colors = [(255, 0, 0), (0, 255, 0), (255, 255, 0), (0, 0, 255)]
-
+        self.locs = [(0, 0), (0, 4), (4, 0), (4, 3)]
         num_states = 500
         num_rows = 5
         num_columns = 5
@@ -294,15 +291,16 @@ class TaxiEnv(Env):
         self.max_col = num_columns - 1
         self.initial_state_distrib = np.zeros(num_states)
         num_actions = 6
-        self.P = {
-            state: {action: [] for action in range(num_actions)}
-            for state in range(num_states)
-        }
+
+        # Preallocate nested dict as array of dicts for speed
+        self.P = [{} for _ in range(num_states)]
+        for state in range(num_states):
+            self.P[state] = {action: [] for action in range(num_actions)}
 
         for row in range(num_rows):
             for col in range(num_columns):
-                for pass_idx in range(len(locs) + 1):  # +1 for being inside taxi
-                    for dest_idx in range(len(locs)):
+                for pass_idx in range(5):  # 4 locations + 1 in taxi
+                    for dest_idx in range(4):
                         state = self.encode(row, col, pass_idx, dest_idx)
                         if pass_idx < 4 and pass_idx != dest_idx:
                             self.initial_state_distrib[state] += 1
@@ -358,16 +356,16 @@ class TaxiEnv(Env):
         return i
 
     def decode(self, i):
-        out = []
-        out.append(i % 4)
-        i = i // 4
-        out.append(i % 5)
-        i = i // 5
-        out.append(i % 5)
-        i = i // 5
-        out.append(i)
-        assert 0 <= i < 5
-        return reversed(out)
+        # Returns (row, col, pass_loc, dest_idx)
+        dest_idx = i % 4
+        i //= 4
+        pass_loc = i % 5
+        i //= 5
+        col = i % 5
+        i //= 5
+        row = i
+        assert 0 <= row < 5
+        return (row, col, pass_loc, dest_idx)
 
     def action_mask(self, state: int):
         """Computes an action mask for the action space using the state information."""
@@ -588,38 +586,42 @@ class TaxiEnv(Env):
         ) * self.cell_size[1]
 
     def _render_text(self):
-        desc = self.desc.copy().tolist()
-        outfile = StringIO()
-
+        # Use fast line processing, pre-caching decoded-map lines
+        desc = self.desc.tolist()
+        # Every line in desc is a list of single b'c' bytes, so decode each
         out = [[c.decode("utf-8") for c in line] for line in desc]
-        taxi_row, taxi_col, pass_idx, dest_idx = self.decode(self.s)
+        s = self.s
+        taxi_row, taxi_col, pass_idx, dest_idx = self.decode(s)
+        colorize = utils.colorize
+        locs = self.locs
 
         def ul(x):
             return "_" if x == " " else x
 
         if pass_idx < 4:
-            out[1 + taxi_row][2 * taxi_col + 1] = utils.colorize(
+            out[1 + taxi_row][2 * taxi_col + 1] = colorize(
                 out[1 + taxi_row][2 * taxi_col + 1], "yellow", highlight=True
             )
-            pi, pj = self.locs[pass_idx]
-            out[1 + pi][2 * pj + 1] = utils.colorize(
+            pi, pj = locs[pass_idx]
+            out[1 + pi][2 * pj + 1] = colorize(
                 out[1 + pi][2 * pj + 1], "blue", bold=True
             )
         else:  # passenger in taxi
-            out[1 + taxi_row][2 * taxi_col + 1] = utils.colorize(
+            out[1 + taxi_row][2 * taxi_col + 1] = colorize(
                 ul(out[1 + taxi_row][2 * taxi_col + 1]), "green", highlight=True
             )
 
-        di, dj = self.locs[dest_idx]
-        out[1 + di][2 * dj + 1] = utils.colorize(out[1 + di][2 * dj + 1], "magenta")
-        outfile.write("\n".join(["".join(row) for row in out]) + "\n")
+        di, dj = locs[dest_idx]
+        out[1 + di][2 * dj + 1] = colorize(out[1 + di][2 * dj + 1], "magenta")
+
+        outfile = StringIO()
+        outfile.write("\n".join(("".join(row) for row in out)) + "\n")
         if self.lastaction is not None:
             outfile.write(
                 f"  ({['South', 'North', 'East', 'West', 'Pickup', 'Dropoff'][self.lastaction]})\n"
             )
         else:
             outfile.write("\n")
-
         with closing(outfile):
             return outfile.getvalue()
 
