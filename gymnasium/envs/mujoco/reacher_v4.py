@@ -32,16 +32,18 @@ class ReacherEnv(MujocoEnv, utils.EzPickle):
         )
 
     def step(self, a):
-        vec = self.get_body_com("fingertip") - self.get_body_com("target")
-        reward_dist = -np.linalg.norm(vec)
-        reward_ctrl = -np.square(a).sum()
+        fingertip_pos = self.get_body_com("fingertip")
+        target_pos = self.get_body_com("target")
+        vec = fingertip_pos - target_pos
+        reward_dist = -np.sqrt(np.dot(vec, vec))
+        reward_ctrl = -np.dot(a, a)
         reward = reward_dist + reward_ctrl
 
         self.do_simulation(a, self.frame_skip)
         if self.render_mode == "human":
             self.render()
 
-        ob = self._get_obs()
+        ob = self._get_obs_cached(fingertip_pos, target_pos)
         # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
         return (
             ob,
@@ -77,5 +79,17 @@ class ReacherEnv(MujocoEnv, utils.EzPickle):
                 self.data.qpos.flat[2:],
                 self.data.qvel.flat[:2],
                 self.get_body_com("fingertip") - self.get_body_com("target"),
+            ]
+        )
+
+    def _get_obs_cached(self, fingertip_pos, target_pos):
+        theta = self.data.qpos.flat[:2]
+        return np.concatenate(
+            [
+                np.cos(theta),
+                np.sin(theta),
+                self.data.qpos.flat[2:],
+                self.data.qvel.flat[:2],
+                fingertip_pos - target_pos,
             ]
         )
