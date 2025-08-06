@@ -1,3 +1,5 @@
+import numpy as np
+
 __credits__ = ["Kallinteris-Andreas"]
 
 import numpy as np
@@ -16,9 +18,9 @@ DEFAULT_CAMERA_CONFIG = {
 
 
 def mass_center(model, data):
-    mass = np.expand_dims(model.body_mass, axis=1)
+    mass = model.body_mass
     xpos = data.xipos
-    return (np.sum(mass * xpos, axis=0) / np.sum(mass))[0:2].copy()
+    return (np.sum(mass[:, None] * xpos, axis=0) / np.sum(mass))[:2]
 
 
 class HumanoidEnv(MujocoEnv, utils.EzPickle):
