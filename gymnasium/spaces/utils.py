@@ -7,7 +7,7 @@ These functions mostly take care of flattening and unflattening elements of spac
 from __future__ import annotations
 
 import operator as op
-from functools import reduce, singledispatch
+from functools import lru_cache, reduce, singledispatch
 from typing import Any, TypeVar, Union
 
 import numpy as np
@@ -543,9 +543,7 @@ def _flatten_space_graph(space: Graph) -> Graph:
 
 @flatten_space.register(Text)
 def _flatten_space_text(space: Text) -> Box:
-    return Box(
-        low=0, high=len(space.character_set), shape=(space.max_length,), dtype=np.int32
-    )
+    return _cached_flattened_box(space.max_length, len(space.character_set))
 
 
 @flatten_space.register(Sequence)
@@ -667,4 +665,11 @@ def _is_space_sequence_dtype_shape_equiv(space_1: Sequence, space_2):
         isinstance(space_2, Sequence)
         and space_1.stack is space_2.stack
         and is_space_dtype_shape_equiv(space_1.feature_space, space_2.feature_space)
+    )
+
+
+@lru_cache(maxsize=256)
+def _cached_flattened_box(max_length: int, high: int) -> Box:
+    return Box(
+        low=0, high=high, shape=(max_length,), dtype=np.int32
     )
