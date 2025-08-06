@@ -1,3 +1,9 @@
+import numpy as np
+import gymnasium as gym
+from gymnasium import spaces
+from gymnasium.error import DependencyNotInstalled
+from os import path
+
 __credits__ = ["Carlos Luis"]
 
 from os import path
@@ -125,24 +131,33 @@ class PendulumEnv(gym.Env):
         self.observation_space = spaces.Box(low=-high, high=high, dtype=np.float32)
 
     def step(self, u):
-        th, thdot = self.state  # th := theta
+        # Avoid repeated attribute access and localize variables
+        state = self.state
+        th = state[0]
+        thdot = state[1]
 
         g = self.g
         m = self.m
         l = self.l
         dt = self.dt
 
+        # u is an array (always shape [1]) - use fast access
         u = np.clip(u, -self.max_torque, self.max_torque)[0]
         self.last_u = u  # for rendering
-        costs = angle_normalize(th) ** 2 + 0.1 * thdot**2 + 0.001 * (u**2)
 
-        newthdot = thdot + (3 * g / (2 * l) * np.sin(th) + 3.0 / (m * l**2) * u) * dt
+        th_cost = angle_normalize(th)
+        costs = th_cost * th_cost + 0.1 * thdot * thdot + 0.001 * (u * u)
+
+        s_th = np.sin(th)
+        newthdot = thdot + (3 * g / (2 * l) * s_th + 3.0 / (m * l * l) * u) * dt
         newthdot = np.clip(newthdot, -self.max_speed, self.max_speed)
         newth = th + newthdot * dt
 
         self.state = np.array([newth, newthdot])
 
-        if self.render_mode == "human":
+        # Avoid repeated self.render_mode attribute access
+        render_mode = self.render_mode
+        if render_mode == "human":
             self.render()
         # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
         return self._get_obs(), -costs, False, False, {}
@@ -168,11 +183,18 @@ class PendulumEnv(gym.Env):
         return self._get_obs(), {}
 
     def _get_obs(self):
-        theta, thetadot = self.state
-        return np.array([np.cos(theta), np.sin(theta), thetadot], dtype=np.float32)
+        # Cache math functions for a tiny gain
+        state = self.state
+        theta = state[0]
+        thetadot = state[1]
+        c = np.cos(theta)
+        s = np.sin(theta)
+        return np.array([c, s, thetadot], dtype=np.float32)
 
     def render(self):
-        if self.render_mode is None:
+        # Fast exit path
+        render_mode = self.render_mode
+        if render_mode is None:
             assert self.spec is not None
             gym.logger.warn(
                 "You are calling render method without specifying any render mode. "
@@ -189,84 +211,106 @@ class PendulumEnv(gym.Env):
                 'pygame is not installed, run `pip install "gymnasium[classic_control]"`'
             ) from e
 
+        screen_dim = self.screen_dim
+        offset = screen_dim // 2
+
+        # Initialization - only once as possible
         if self.screen is None:
             pygame.init()
-            if self.render_mode == "human":
+            if render_mode == "human":
                 pygame.display.init()
-                self.screen = pygame.display.set_mode(
-                    (self.screen_dim, self.screen_dim)
-                )
+                self.screen = pygame.display.set_mode((screen_dim, screen_dim))
             else:  # mode in "rgb_array"
-                self.screen = pygame.Surface((self.screen_dim, self.screen_dim))
+                self.screen = pygame.Surface((screen_dim, screen_dim))
         if self.clock is None:
             self.clock = pygame.time.Clock()
 
-        self.surf = pygame.Surface((self.screen_dim, self.screen_dim))
-        self.surf.fill((255, 255, 255))
+        # Create surface and clear color
+        surf = pygame.Surface((screen_dim, screen_dim))
+        surf.fill((255, 255, 255))
 
         bound = 2.2
-        scale = self.screen_dim / (bound * 2)
-        offset = self.screen_dim // 2
+        scale = screen_dim / (bound * 2)
 
-        rod_length = 1 * scale
+        rod_length = scale
         rod_width = 0.2 * scale
-        l, r, t, b = 0, rod_length, rod_width / 2, -rod_width / 2
-        coords = [(l, b), (l, t), (r, t), (r, b)]
-        transformed_coords = []
-        for c in coords:
-            c = pygame.math.Vector2(c).rotate_rad(self.state[0] + np.pi / 2)
-            c = (c[0] + offset, c[1] + offset)
-            transformed_coords.append(c)
-        gfxdraw.aapolygon(self.surf, transformed_coords, (204, 77, 77))
-        gfxdraw.filled_polygon(self.surf, transformed_coords, (204, 77, 77))
+        half_rod_width = rod_width / 2
 
-        gfxdraw.aacircle(self.surf, offset, offset, int(rod_width / 2), (204, 77, 77))
-        gfxdraw.filled_circle(
-            self.surf, offset, offset, int(rod_width / 2), (204, 77, 77)
+        # Build rectangle coords clockwise, rotated about origin by (theta+pi/2)
+        coords_base = np.array([
+            [0, -half_rod_width],
+            [0,  half_rod_width],
+            [rod_length,  half_rod_width],
+            [rod_length, -half_rod_width]
+        ])
+        theta = self.state[0] + PI / 2
+        cos_t = np.cos(theta)
+        sin_t = np.sin(theta)
+        rot_mat = np.array(
+            [[cos_t, -sin_t],
+             [sin_t,  cos_t]],
+            dtype=np.float32
         )
+        # Apply rotation, then translate to screen center
+        coords = coords_base @ rot_mat.T
+        coords[:, 0] += offset
+        coords[:, 1] += offset
+        polygon_coords = [tuple(map(int, c)) for c in coords]
 
-        rod_end = (rod_length, 0)
-        rod_end = pygame.math.Vector2(rod_end).rotate_rad(self.state[0] + np.pi / 2)
-        rod_end = (int(rod_end[0] + offset), int(rod_end[1] + offset))
-        gfxdraw.aacircle(
-            self.surf, rod_end[0], rod_end[1], int(rod_width / 2), (204, 77, 77)
-        )
-        gfxdraw.filled_circle(
-            self.surf, rod_end[0], rod_end[1], int(rod_width / 2), (204, 77, 77)
-        )
+        # Draw rod
+        gfxdraw.aapolygon(surf, polygon_coords, (204, 77, 77))
+        gfxdraw.filled_polygon(surf, polygon_coords, (204, 77, 77))
 
-        fname = path.join(path.dirname(__file__), "assets/clockwise.png")
-        img = pygame.image.load(fname)
-        if self.last_u is not None:
-            scale_img = pygame.transform.smoothscale(
-                img,
-                (
-                    float(scale * np.abs(self.last_u) / 2),
-                    float(scale * np.abs(self.last_u) / 2),
-                ),
-            )
-            is_flip = bool(self.last_u > 0)
-            scale_img = pygame.transform.flip(scale_img, is_flip, True)
-            self.surf.blit(
-                scale_img,
-                (
-                    offset - scale_img.get_rect().centerx,
-                    offset - scale_img.get_rect().centery,
-                ),
-            )
+        # Draw origin axle
+        axle_radius = int(0.05 * scale)
+        gfxdraw.aacircle(surf, offset, offset, axle_radius, (0, 0, 0))
+        gfxdraw.filled_circle(surf, offset, offset, axle_radius, (0, 0, 0))
 
-        # drawing axle
-        gfxdraw.aacircle(self.surf, offset, offset, int(0.05 * scale), (0, 0, 0))
-        gfxdraw.filled_circle(self.surf, offset, offset, int(0.05 * scale), (0, 0, 0))
+        # Draw origin hub on the rod
+        hub_rad = int(half_rod_width)
+        gfxdraw.aacircle(surf, offset, offset, hub_rad, (204, 77, 77))
+        gfxdraw.filled_circle(surf, offset, offset, hub_rad, (204, 77, 77))
 
-        self.surf = pygame.transform.flip(self.surf, False, True)
-        self.screen.blit(self.surf, (0, 0))
-        if self.render_mode == "human":
+        # Draw outer tip
+        rod_end = np.array([rod_length, 0])
+        tip_rot = np.array([
+            [cos_t, -sin_t],
+            [sin_t,  cos_t]
+        ], dtype=np.float32)
+        tip_xy = rod_end @ tip_rot.T
+        tip_px = (int(tip_xy[0] + offset), int(tip_xy[1] + offset))
+        gfxdraw.aacircle(surf, tip_px[0], tip_px[1], hub_rad, (204, 77, 77))
+        gfxdraw.filled_circle(surf, tip_px[0], tip_px[1], hub_rad, (204, 77, 77))
+
+        # Draw action arrow only if self.last_u is set, and non-null
+        last_u = getattr(self, "last_u", None)
+        if last_u is not None:
+            fname = path.join(path.dirname(__file__), "assets/clockwise.png")
+            img = pygame.image.load(fname)
+            img_size = int(scale * abs(last_u) / 2)
+            if img_size > 0:
+                scale_img = pygame.transform.smoothscale(
+                    img, (img_size, img_size)
+                )
+                is_flip = bool(last_u > 0)
+                scale_img = pygame.transform.flip(scale_img, is_flip, True)
+                surf.blit(
+                    scale_img,
+                    (
+                        offset - scale_img.get_rect().centerx,
+                        offset - scale_img.get_rect().centery,
+                    ),
+                )
+
+        # Flip for correct visual orientation
+        surf = pygame.transform.flip(surf, False, True)
+        self.screen.blit(surf, (0, 0))
+        if render_mode == "human":
             pygame.event.pump()
             self.clock.tick(self.metadata["render_fps"])
             pygame.display.flip()
-
-        else:  # mode == "rgb_array":
+        else:
+            # "rgb_array"
             return np.transpose(
                 np.array(pygame.surfarray.pixels3d(self.screen)), axes=(1, 0, 2)
             )
@@ -281,4 +325,8 @@ class PendulumEnv(gym.Env):
 
 
 def angle_normalize(x):
-    return ((x + np.pi) % (2 * np.pi)) - np.pi
+    return ((x + PI) % TWO_PI) - PI
+
+PI = np.pi
+
+TWO_PI = 2 * np.pi
