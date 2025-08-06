@@ -12,6 +12,8 @@ import gymnasium as gym
 from gymnasium import Env, logger
 from gymnasium.core import ActType, ObsType
 from gymnasium.error import DependencyNotInstalled
+import pygame
+from itertools import chain
 
 
 if TYPE_CHECKING:
@@ -85,7 +87,7 @@ class PlayableGame:
                     "please specify one manually, `play(env, keys_to_action=...)`"
                 )
         assert isinstance(keys_to_action, dict)
-        relevant_keys = set(sum((list(k) for k in keys_to_action.keys()), []))
+        relevant_keys = set(chain.from_iterable(keys_to_action.keys()))
         return relevant_keys
 
     def _get_video_size(self, zoom: float | None = None) -> tuple[int, int]:
