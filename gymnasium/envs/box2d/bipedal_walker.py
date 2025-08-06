@@ -1,3 +1,5 @@
+import numpy as np
+
 __credits__ = ["Andrea PIERRÉ"]
 
 import math
@@ -793,64 +795,83 @@ class BipedalWalkerHeuristics:
     a = np.array([0.0, 0.0, 0.0, 0.0])
 
     def step_heuristic(self, s):
-        moving_s_base = 4 + 5 * self.moving_leg
-        supporting_s_base = 4 + 5 * self.supporting_leg
+        state = self.state
+        moving_leg = self.moving_leg
+        supporting_leg = self.supporting_leg
+        SPEED = self.SPEED
+        SUPPORT_KNEE_ANGLE = self.SUPPORT_KNEE_ANGLE
+        supporting_knee_angle = self.supporting_knee_angle
 
-        hip_targ = [None, None]  # -0.8 .. +1.1
-        knee_targ = [None, None]  # -0.6 .. +0.9
+        moving_s_base = 4 + 5 * moving_leg
+        supporting_s_base = 4 + 5 * supporting_leg
+
+        # Preallocate output arrays for speed.
+        hip_targ = [0.0, 0.0]
+        knee_targ = [0.0, 0.0]
         hip_todo = [0.0, 0.0]
         knee_todo = [0.0, 0.0]
 
-        if self.state == self.STAY_ON_ONE_LEG:
-            hip_targ[self.moving_leg] = 1.1
-            knee_targ[self.moving_leg] = -0.6
-            self.supporting_knee_angle += 0.03
-            if s[2] > self.SPEED:
-                self.supporting_knee_angle += 0.03
-            self.supporting_knee_angle = min(
-                self.supporting_knee_angle, self.SUPPORT_KNEE_ANGLE
-            )
-            knee_targ[self.supporting_leg] = self.supporting_knee_angle
-            if s[supporting_s_base + 0] < 0.10:  # supporting leg is behind
-                self.state = self.PUT_OTHER_DOWN
-        if self.state == self.PUT_OTHER_DOWN:
-            hip_targ[self.moving_leg] = +0.1
-            knee_targ[self.moving_leg] = self.SUPPORT_KNEE_ANGLE
-            knee_targ[self.supporting_leg] = self.supporting_knee_angle
+        if state == self.STAY_ON_ONE_LEG:
+            hip_targ[moving_leg] = 1.1
+            knee_targ[moving_leg] = -0.6
+            supporting_knee_angle = supporting_knee_angle + 0.03
+            if s[2] > SPEED:
+                supporting_knee_angle = supporting_knee_angle + 0.03
+            # Clamp supporting_knee_angle to SUPPORT_KNEE_ANGLE
+            if supporting_knee_angle > SUPPORT_KNEE_ANGLE:
+                supporting_knee_angle = SUPPORT_KNEE_ANGLE
+            knee_targ[supporting_leg] = supporting_knee_angle
+            if s[supporting_s_base + 0] < 0.10:
+                state = self.PUT_OTHER_DOWN
+        if state == self.PUT_OTHER_DOWN:
+            hip_targ[moving_leg] = 0.1
+            knee_targ[moving_leg] = SUPPORT_KNEE_ANGLE
+            knee_targ[supporting_leg] = supporting_knee_angle
             if s[moving_s_base + 4]:
-                self.state = self.PUSH_OFF
-                self.supporting_knee_angle = min(
-                    s[moving_s_base + 2], self.SUPPORT_KNEE_ANGLE
-                )
-        if self.state == self.PUSH_OFF:
-            knee_targ[self.moving_leg] = self.supporting_knee_angle
-            knee_targ[self.supporting_leg] = +1.0
-            if s[supporting_s_base + 2] > 0.88 or s[2] > 1.2 * self.SPEED:
-                self.state = self.STAY_ON_ONE_LEG
-                self.moving_leg = 1 - self.moving_leg
-                self.supporting_leg = 1 - self.moving_leg
+                state = self.PUSH_OFF
+                supporting_knee_angle = s[moving_s_base + 2]
+                if supporting_knee_angle > SUPPORT_KNEE_ANGLE:
+                    supporting_knee_angle = SUPPORT_KNEE_ANGLE
+        if state == self.PUSH_OFF:
+            knee_targ[moving_leg] = supporting_knee_angle
+            knee_targ[supporting_leg] = 1.0
+            if s[supporting_s_base + 2] > 0.88 or s[2] > 1.2 * SPEED:
+                state = self.STAY_ON_ONE_LEG
+                moving_leg = 1 - moving_leg
+                supporting_leg = 1 - moving_leg
 
-        if hip_targ[0]:
+        # Compute hip_todo and knee_todo only for nonzero hip_targ, knee_targ
+        if hip_targ[0] != 0.0:
             hip_todo[0] = 0.9 * (hip_targ[0] - s[4]) - 0.25 * s[5]
-        if hip_targ[1]:
+        if hip_targ[1] != 0.0:
             hip_todo[1] = 0.9 * (hip_targ[1] - s[9]) - 0.25 * s[10]
-        if knee_targ[0]:
+        if knee_targ[0] != 0.0:
             knee_todo[0] = 4.0 * (knee_targ[0] - s[6]) - 0.25 * s[7]
-        if knee_targ[1]:
+        if knee_targ[1] != 0.0:
             knee_todo[1] = 4.0 * (knee_targ[1] - s[11]) - 0.25 * s[12]
 
-        hip_todo[0] -= 0.9 * (0 - s[0]) - 1.5 * s[1]  # PID to keep head strait
-        hip_todo[1] -= 0.9 * (0 - s[0]) - 1.5 * s[1]
-        knee_todo[0] -= 15.0 * s[3]  # vertical speed, to damp oscillations
-        knee_todo[1] -= 15.0 * s[3]
+        offset = 0.9 * s[0] + 1.5 * s[1]
+        hip_todo[0] += offset
+        hip_todo[1] += offset
+        damp = 15.0 * s[3]
+        knee_todo[0] -= damp
+        knee_todo[1] -= damp
 
-        self.a[0] = hip_todo[0]
-        self.a[1] = knee_todo[0]
-        self.a[2] = hip_todo[1]
-        self.a[3] = knee_todo[1]
-        self.a = np.clip(0.5 * self.a, -1.0, 1.0)
+        # Write result to self.a in-place for reuse, minimize allocations.
+        a = self.a
+        a[0] = hip_todo[0]
+        a[1] = knee_todo[0]
+        a[2] = hip_todo[1]
+        a[3] = knee_todo[1]
+        a *= 0.5
+        np.clip(a, -1.0, 1.0, out=a)
 
-        return self.a
+        # Write variables back to self
+        self.state = state
+        self.moving_leg = moving_leg
+        self.supporting_leg = supporting_leg
+        self.supporting_knee_angle = supporting_knee_angle
+        return a
 
 
 if __name__ == "__main__":
