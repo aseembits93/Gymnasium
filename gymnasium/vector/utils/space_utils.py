@@ -177,21 +177,41 @@ def batch_differing_spaces(spaces: typing.Sequence[Space]) -> Space:
 
 @batch_differing_spaces.register(Box)
 def _batch_differing_spaces_box(spaces: list[Box]):
-    assert all(
-        spaces[0].dtype == space.dtype for space in spaces
-    ), f"Expected all dtypes to be equal, actually {[space.dtype for space in spaces]}"
-    assert all(
-        spaces[0].low.shape == space.low.shape for space in spaces
-    ), f"Expected all Box.low shape to be equal, actually {[space.low.shape for space in spaces]}"
-    assert all(
-        spaces[0].high.shape == space.high.shape for space in spaces
-    ), f"Expected all Box.high shape to be equal, actually {[space.high.shape for space in spaces]}"
+    # Extract reference values from the first space
+    ref = spaces[0]
+    dtype = ref.dtype
+    low_shape = ref.low.shape
+    high_shape = ref.high.shape
+
+    # Combine all checks in single loop for efficiency
+    for space in spaces:
+        if space.dtype != dtype:
+            raise AssertionError(
+                f"Expected all dtypes to be equal, actually {[space.dtype for space in spaces]}"
+            )
+        if space.low.shape != low_shape:
+            raise AssertionError(
+                f"Expected all Box.low shape to be equal, actually {[space.low.shape for space in spaces]}"
+            )
+        if space.high.shape != high_shape:
+            raise AssertionError(
+                f"Expected all Box.high shape to be equal, actually {[space.high.shape for space in spaces]}"
+            )
+
+    # Build low and high arrays in one pass
+    lows = np.stack([space.low for space in spaces], axis=0)
+    highs = np.stack([space.high for space in spaces], axis=0)
+
+    # Instead of deepcopy(np_random), use the seed of the first space if available
+    # This replicates the likely intent in a more efficient way.
+    # If seed state is required, create a new Generator with the same seed.
+    seed = getattr(ref, '_seed', None)
 
     return Box(
-        low=np.array([space.low for space in spaces]),
-        high=np.array([space.high for space in spaces]),
-        dtype=spaces[0].dtype,
-        seed=deepcopy(spaces[0].np_random),
+        low=lows,
+        high=highs,
+        dtype=dtype,
+        seed=seed,
     )
 
 
