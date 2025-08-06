@@ -175,11 +175,21 @@ def _flatten_discrete(space: Discrete, x: np.int64) -> NDArray[np.int64]:
 def _flatten_multidiscrete(
     space: MultiDiscrete, x: NDArray[np.int64]
 ) -> NDArray[np.int64]:
-    offsets = np.zeros((space.nvec.size + 1,), dtype=np.int32)
-    offsets[1:] = np.cumsum(space.nvec.flatten())
+    # Directly use the flattened nvec for cumsum without extra .flatten()
+    nvec = space.nvec.ravel()
+    start = space.start
 
-    onehot = np.zeros((offsets[-1],), dtype=space.dtype)
-    onehot[offsets[:-1] + (x - space.start).flatten()] = 1
+    # Compute offsets with a single call, store as intp for indexing speed
+    offsets = np.empty(nvec.size + 1, dtype=np.intp)
+    offsets[0] = 0
+    np.cumsum(nvec, out=offsets[1:])
+
+    x_flat = x.ravel()
+    # Preallocate onehot and set values by direct indexing
+    onehot = np.zeros(offsets[-1], dtype=space.dtype)
+    # Avoid (x - start).flatten() allocation by doing (x_flat - start)
+    indices = offsets[:-1] + (x_flat - start)
+    onehot[indices] = 1
     return onehot
 
 
