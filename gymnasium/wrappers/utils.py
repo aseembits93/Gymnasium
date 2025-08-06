@@ -140,11 +140,11 @@ def _create_text_zero_array(space: Text):
 
 @create_zero_array.register(Graph)
 def _create_graph_zero_array(space: Graph):
-    nodes = np.expand_dims(create_zero_array(space.node_space), axis=0)
+    nodes = np.array([create_zero_array(space.node_space)])
     if space.edge_space is None:
         return GraphInstance(nodes=nodes, edges=None, edge_links=None)
     else:
-        edges = np.expand_dims(create_zero_array(space.edge_space), axis=0)
+        edges = np.array([create_zero_array(space.edge_space)])
         edge_links = np.zeros((1, 2), dtype=np.int64)
         return GraphInstance(nodes=nodes, edges=edges, edge_links=edge_links)
 
