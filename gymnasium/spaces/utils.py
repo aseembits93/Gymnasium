@@ -495,7 +495,9 @@ def flatten_space(space: Space[Any]) -> Box | Dict | Sequence | Tuple | Graph:
 
 @flatten_space.register(Box)
 def _flatten_space_box(space: Box) -> Box:
-    return Box(space.low.flatten(), space.high.flatten(), dtype=space.dtype)
+    if space.low.ndim == 1 and space.high.ndim == 1:
+        return space
+    return Box(space.low.reshape(-1), space.high.reshape(-1), dtype=space.dtype)
 
 
 @flatten_space.register(Discrete)
