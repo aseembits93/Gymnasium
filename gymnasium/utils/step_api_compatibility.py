@@ -38,45 +38,56 @@ def convert_to_terminated_truncated_step_api(
     """
     if len(step_returns) == 5:
         return step_returns
-    else:
-        assert len(step_returns) == 4
-        observations, rewards, dones, infos = step_returns
 
-        # Cases to handle - info single env /  info vector env (list) / info vector env (dict)
-        if is_vector_env is False:
-            truncated = infos.pop("TimeLimit.truncated", False)
-            return (
-                observations,
-                rewards,
-                dones and not truncated,
-                dones and truncated,
-                infos,
-            )
-        elif isinstance(infos, list):
-            truncated = np.array(
-                [info.pop("TimeLimit.truncated", False) for info in infos]
-            )
-            return (
-                observations,
-                rewards,
-                np.logical_and(dones, np.logical_not(truncated)),
-                np.logical_and(dones, truncated),
-                infos,
-            )
-        elif isinstance(infos, dict):
-            num_envs = len(dones)
-            truncated = infos.pop("TimeLimit.truncated", np.zeros(num_envs, dtype=bool))
-            return (
-                observations,
-                rewards,
-                np.logical_and(dones, np.logical_not(truncated)),
-                np.logical_and(dones, truncated),
-                infos,
-            )
-        else:
-            raise TypeError(
-                f"Unexpected value of infos, as is_vector_envs=False, expects `info` to be a list or dict, actual type: {type(infos)}"
-            )
+    # Only four-element tuple
+    assert len(step_returns) == 4
+    observations, rewards, dones, infos = step_returns
+
+    if not is_vector_env:
+        truncated = infos.pop("TimeLimit.truncated", False)
+        not_truncated = not truncated
+        done_and_not_truncated = dones and not_truncated
+        done_and_truncated = dones and truncated
+        return (
+            observations,
+            rewards,
+            done_and_not_truncated,
+            done_and_truncated,
+            infos,
+        )
+
+    infos_type = type(infos)
+    if infos_type is list:
+        pop = dict.pop
+        # This avoids implicit function call overhead
+        result = [pop(info, "TimeLimit.truncated", False) for info in infos]
+        truncated = np.fromiter(result, dtype=bool, count=len(infos))
+        not_truncated = ~truncated
+        # Use bitwise and for boolean arrays/lists
+        dones = np.asarray(dones)
+        return (
+            observations,
+            rewards,
+            dones & not_truncated,
+            dones & truncated,
+            infos,
+        )
+    elif infos_type is dict:
+        num_envs = len(dones)
+        truncated = infos.pop("TimeLimit.truncated", np.zeros(num_envs, dtype=bool))
+        not_truncated = ~truncated
+        dones = np.asarray(dones)
+        return (
+            observations,
+            rewards,
+            dones & not_truncated,
+            dones & truncated,
+            infos,
+        )
+
+    raise TypeError(
+        f"Unexpected value of infos, as is_vector_envs=False, expects `info` to be a list or dict, actual type: {type(infos)}"
+    )
 
 
 def convert_to_done_step_api(
