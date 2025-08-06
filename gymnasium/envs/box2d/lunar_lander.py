@@ -1,3 +1,8 @@
+from __future__ import annotations
+import math
+import numpy as np
+from gymnasium.utils.step_api_compatibility import step_api_compatibility
+
 __credits__ = ["Andrea PIERRÉ"]
 
 import math
@@ -818,7 +823,7 @@ def heuristic(env, s):
         angle_targ = 0.4  # more than 0.4 radians (22 degrees) is bad
     if angle_targ < -0.4:
         angle_targ = -0.4
-    hover_targ = 0.55 * np.abs(
+    hover_targ = 0.55 * math.fabs(
         s[0]
     )  # target y should be proportional to horizontal offset
 
@@ -836,7 +841,7 @@ def heuristic(env, s):
         a = np.clip(a, -1, +1)
     else:
         a = 0
-        if hover_todo > np.abs(angle_todo) and hover_todo > 0.05:
+        if hover_todo > math.fabs(angle_todo) and hover_todo > 0.05:
             a = 2
         elif angle_todo < -0.05:
             a = 3
