@@ -186,7 +186,7 @@ class CliffWalkingFunctional(
 
     def initial(self, rng: PRNGKeyType, params: None = None) -> EnvState:
         """Cliffwalking initial observation function."""
-        player_position = jnp.array([3, 0])
+        player_position = _PLAYER_POSITION_INIT
 
         state = EnvState(player_position=player_position, last_action=-1, fallen=False)
         return state
@@ -393,3 +393,5 @@ if __name__ == "__main__":
         print(obs, reward, terminal, truncated, info)
 
     exit()
+
+_PLAYER_POSITION_INIT = jnp.array([3, 0])
