@@ -786,6 +786,12 @@ class DiscretizeObservation(
             for i in range(self.n_dims)
         ]
 
+        # Precompute flattening multipliers for fast linear index calculation
+        if not self.multidiscrete:
+            self._flatten_factors = np.ones(self.n_dims, dtype=int)
+            for i in range(self.n_dims - 2, -1, -1):
+                self._flatten_factors[i] = self._flatten_factors[i+1] * self.bins[i+1]
+
         if self.multidiscrete:
             self.observation_space = spaces.MultiDiscrete(self.bins)
         else:
@@ -800,7 +806,7 @@ class DiscretizeObservation(
         # to prevent precision issues.
         clipped = np.clip(observation, self.low, self.high - 1e-8)
         indices = [
-            int(np.digitize(clipped[i], self.bin_edges[i])) for i in range(self.n_dims)
+            int(np.searchsorted(self.bin_edges[i], clipped[i], side='right')) for i in range(self.n_dims)
         ]
         if self.multidiscrete:
             return np.array(indices, dtype=np.int64)
@@ -824,11 +830,11 @@ class DiscretizeObservation(
         )
 
     def _flatten_indices(self, indices):
-        flat_index = 0
-        for i in range(self.n_dims):
-            flat_index *= self.bins[i]
-            flat_index += indices[i]
-        return flat_index
+        """
+        Flatten multi-dimensional indices to a single integer using precomputed factors.
+        """
+        # This is much faster than the Python loop; reduces to a single dot product
+        return np.dot(indices, self._flatten_factors)
 
     def _unflatten_index(self, flat_index):
         indices = []
