@@ -161,7 +161,10 @@ def flatten(space: Space[T], x: T) -> FlatType:
 @flatten.register(Box)
 @flatten.register(MultiBinary)
 def _flatten_box_multibinary(space: Box | MultiBinary, x: NDArray[Any]) -> NDArray[Any]:
-    return np.asarray(x, dtype=space.dtype).flatten()
+    arr = np.asarray(x, dtype=space.dtype, order='C')
+    if arr.ndim == 1:
+        return arr
+    return arr.ravel()
 
 
 @flatten.register(Discrete)
