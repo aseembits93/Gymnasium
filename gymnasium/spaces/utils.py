@@ -7,7 +7,7 @@ These functions mostly take care of flattening and unflattening elements of spac
 from __future__ import annotations
 
 import operator as op
-from functools import reduce, singledispatch
+from functools import lru_cache, reduce, singledispatch
 from typing import Any, TypeVar, Union
 
 import numpy as np
@@ -668,3 +668,15 @@ def _is_space_sequence_dtype_shape_equiv(space_1: Sequence, space_2):
         and space_1.stack is space_2.stack
         and is_space_dtype_shape_equiv(space_1.feature_space, space_2.feature_space)
     )
+
+
+@lru_cache(maxsize=8)
+def _flatdim_type(space_type):
+    # dispatched helper for typed spaces
+    if issubclass(space_type, Discrete):
+        return 1
+    if issubclass(space_type, MultiBinary):
+        return None  # handled in function
+    if issubclass(space_type, MultiDiscrete):
+        return None
+    return None
