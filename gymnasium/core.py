@@ -267,7 +267,7 @@ class Env(Generic[ObsType, ActType]):
 
     def has_wrapper_attr(self, name: str) -> bool:
         """Checks if the attribute `name` exists in the environment."""
-        return hasattr(self, name)
+        return name in self.__dict__ or hasattr(self, name)
 
     def get_wrapper_attr(self, name: str) -> Any:
         """Gets the attribute `name` from the environment."""
