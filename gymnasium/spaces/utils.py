@@ -71,7 +71,8 @@ def _flatdim_discrete(space: Discrete) -> int:
 
 @flatdim.register(MultiDiscrete)
 def _flatdim_multidiscrete(space: MultiDiscrete) -> int:
-    return int(np.sum(space.nvec))
+    # Use Python's built-in sum and sequence protocol for better performance on small arrays
+    return int(space.nvec.sum() if hasattr(space.nvec, 'sum') else sum(space.nvec))
 
 
 @flatdim.register(Tuple)
