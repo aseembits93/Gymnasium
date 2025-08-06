@@ -275,7 +275,6 @@ class TaxiEnv(Env):
             self.P[state][action].append((0.1, right_state, -1, terminated))
         else:
             self.P[state][action].append((1.0, intended_state, reward, terminated))
-
     def __init__(
         self,
         render_mode: str | None = None,
@@ -283,10 +282,8 @@ class TaxiEnv(Env):
         fickle_passenger: bool = False,
     ):
         self.desc = np.asarray(MAP, dtype="c")
-
         self.locs = locs = [(0, 0), (0, 4), (4, 0), (4, 3)]
         self.locs_colors = [(255, 0, 0), (0, 255, 0), (255, 255, 0), (0, 0, 255)]
-
         num_states = 500
         num_rows = 5
         num_columns = 5
@@ -294,11 +291,12 @@ class TaxiEnv(Env):
         self.max_col = num_columns - 1
         self.initial_state_distrib = np.zeros(num_states)
         num_actions = 6
+
+        # Use dict comprehension as before; little to optimize in this block
         self.P = {
             state: {action: [] for action in range(num_actions)}
             for state in range(num_states)
         }
-
         for row in range(num_rows):
             for col in range(num_columns):
                 for pass_idx in range(len(locs) + 1):  # +1 for being inside taxi
@@ -308,21 +306,9 @@ class TaxiEnv(Env):
                             self.initial_state_distrib[state] += 1
                         for action in range(num_actions):
                             if is_rainy:
-                                self._build_rainy_transitions(
-                                    row,
-                                    col,
-                                    pass_idx,
-                                    dest_idx,
-                                    action,
-                                )
+                                self._build_rainy_transitions(row, col, pass_idx, dest_idx, action)
                             else:
-                                self._build_dry_transitions(
-                                    row,
-                                    col,
-                                    pass_idx,
-                                    dest_idx,
-                                    action,
-                                )
+                                self._build_dry_transitions(row, col, pass_idx, dest_idx, action)
         self.initial_state_distrib /= self.initial_state_distrib.sum()
         self.action_space = spaces.Discrete(num_actions)
         self.observation_space = spaces.Discrete(num_states)
@@ -338,6 +324,8 @@ class TaxiEnv(Env):
             WINDOW_SIZE[0] / self.desc.shape[1],
             WINDOW_SIZE[1] / self.desc.shape[0],
         )
+        # Preload slots for pygame assets (populated later)
+        self._assets_prepared = False
         self.taxi_imgs = None
         self.taxi_orientation = 0
         self.passenger_img = None
@@ -345,6 +333,7 @@ class TaxiEnv(Env):
         self.median_horiz = None
         self.median_vert = None
         self.background_img = None
+        self._cached_static_bg = None
 
     def encode(self, taxi_row, taxi_col, pass_loc, dest_idx):
         # (5) 5, 5, 4
@@ -358,16 +347,16 @@ class TaxiEnv(Env):
         return i
 
     def decode(self, i):
-        out = []
-        out.append(i % 4)
-        i = i // 4
-        out.append(i % 5)
-        i = i // 5
-        out.append(i % 5)
-        i = i // 5
-        out.append(i)
-        assert 0 <= i < 5
-        return reversed(out)
+        # Optimized decode: return a tuple instead of list-reverse (this is hot in rendering)
+        dest_idx = i % 4
+        i //= 4
+        pass_idx = i % 5
+        i //= 5
+        taxi_col = i % 5
+        i //= 5
+        taxi_row = i
+        assert 0 <= taxi_row < 5
+        return (taxi_row, taxi_col, pass_idx, dest_idx)
 
     def action_mask(self, state: int):
         """Computes an action mask for the action space using the state information."""
@@ -467,90 +456,18 @@ class TaxiEnv(Env):
             elif mode == "rgb_array":
                 self.window = pygame.Surface(WINDOW_SIZE)
 
-        assert (
-            self.window is not None
-        ), "Something went wrong with pygame. This should never happen."
+        assert self.window is not None, "Something went wrong with pygame. This should never happen."
         if self.clock is None:
             self.clock = pygame.time.Clock()
-        if self.taxi_imgs is None:
-            file_names = [
-                path.join(path.dirname(__file__), "img/cab_front.png"),
-                path.join(path.dirname(__file__), "img/cab_rear.png"),
-                path.join(path.dirname(__file__), "img/cab_right.png"),
-                path.join(path.dirname(__file__), "img/cab_left.png"),
-            ]
-            self.taxi_imgs = [
-                pygame.transform.scale(pygame.image.load(file_name), self.cell_size)
-                for file_name in file_names
-            ]
-        if self.passenger_img is None:
-            file_name = path.join(path.dirname(__file__), "img/passenger.png")
-            self.passenger_img = pygame.transform.scale(
-                pygame.image.load(file_name), self.cell_size
-            )
-        if self.destination_img is None:
-            file_name = path.join(path.dirname(__file__), "img/hotel.png")
-            self.destination_img = pygame.transform.scale(
-                pygame.image.load(file_name), self.cell_size
-            )
-            self.destination_img.set_alpha(170)
-        if self.median_horiz is None:
-            file_names = [
-                path.join(path.dirname(__file__), "img/gridworld_median_left.png"),
-                path.join(path.dirname(__file__), "img/gridworld_median_horiz.png"),
-                path.join(path.dirname(__file__), "img/gridworld_median_right.png"),
-            ]
-            self.median_horiz = [
-                pygame.transform.scale(pygame.image.load(file_name), self.cell_size)
-                for file_name in file_names
-            ]
-        if self.median_vert is None:
-            file_names = [
-                path.join(path.dirname(__file__), "img/gridworld_median_top.png"),
-                path.join(path.dirname(__file__), "img/gridworld_median_vert.png"),
-                path.join(path.dirname(__file__), "img/gridworld_median_bottom.png"),
-            ]
-            self.median_vert = [
-                pygame.transform.scale(pygame.image.load(file_name), self.cell_size)
-                for file_name in file_names
-            ]
-        if self.background_img is None:
-            file_name = path.join(path.dirname(__file__), "img/taxi_background.png")
-            self.background_img = pygame.transform.scale(
-                pygame.image.load(file_name), self.cell_size
-            )
 
-        desc = self.desc
+        self._prepare_pygame_assets()
 
-        for y in range(0, desc.shape[0]):
-            for x in range(0, desc.shape[1]):
-                cell = (x * self.cell_size[0], y * self.cell_size[1])
-                self.window.blit(self.background_img, cell)
-                if desc[y][x] == b"|" and (y == 0 or desc[y - 1][x] != b"|"):
-                    self.window.blit(self.median_vert[0], cell)
-                elif desc[y][x] == b"|" and (
-                    y == desc.shape[0] - 1 or desc[y + 1][x] != b"|"
-                ):
-                    self.window.blit(self.median_vert[2], cell)
-                elif desc[y][x] == b"|":
-                    self.window.blit(self.median_vert[1], cell)
-                elif desc[y][x] == b"-" and (x == 0 or desc[y][x - 1] != b"-"):
-                    self.window.blit(self.median_horiz[0], cell)
-                elif desc[y][x] == b"-" and (
-                    x == desc.shape[1] - 1 or desc[y][x + 1] != b"-"
-                ):
-                    self.window.blit(self.median_horiz[2], cell)
-                elif desc[y][x] == b"-":
-                    self.window.blit(self.median_horiz[1], cell)
+        # Fastest: draw static pre-rendered grid BG to window in one blit
+        self.window.blit(self._cached_static_bg, (0,0))
 
-        for cell, color in zip(self.locs, self.locs_colors):
-            color_cell = pygame.Surface(self.cell_size)
-            color_cell.set_alpha(128)
-            color_cell.fill(color)
-            loc = self.get_surf_loc(cell)
-            self.window.blit(color_cell, (loc[0], loc[1] + 10))
-
+        # Dynamic rendering (taxi, passenger, destination)
         taxi_row, taxi_col, pass_idx, dest_idx = self.decode(self.s)
+        cs = self.cell_size
 
         if pass_idx < 4:
             self.window.blit(self.passenger_img, self.get_surf_loc(self.locs[pass_idx]))
@@ -561,17 +478,11 @@ class TaxiEnv(Env):
         taxi_location = self.get_surf_loc((taxi_row, taxi_col))
 
         if dest_loc[1] <= taxi_location[1]:
-            self.window.blit(
-                self.destination_img,
-                (dest_loc[0], dest_loc[1] - self.cell_size[1] // 2),
-            )
+            self.window.blit(self.destination_img, (dest_loc[0], dest_loc[1] - cs[1] // 2))
             self.window.blit(self.taxi_imgs[self.taxi_orientation], taxi_location)
         else:  # change blit order for overlapping appearance
             self.window.blit(self.taxi_imgs[self.taxi_orientation], taxi_location)
-            self.window.blit(
-                self.destination_img,
-                (dest_loc[0], dest_loc[1] - self.cell_size[1] // 2),
-            )
+            self.window.blit(self.destination_img, (dest_loc[0], dest_loc[1] - cs[1] // 2))
 
         if mode == "human":
             pygame.event.pump()
@@ -583,9 +494,10 @@ class TaxiEnv(Env):
             )
 
     def get_surf_loc(self, map_loc):
-        return (map_loc[1] * 2 + 1) * self.cell_size[0], (
-            map_loc[0] + 1
-        ) * self.cell_size[1]
+        # Optimize by avoiding extra parenthesis, and minimize attribute lookups
+        x, y = map_loc[1], map_loc[0]
+        cs = self.cell_size
+        return ((x * 2 + 1) * cs[0], (y + 1) * cs[1])
 
     def _render_text(self):
         desc = self.desc.copy().tolist()
@@ -629,6 +541,83 @@ class TaxiEnv(Env):
 
             pygame.display.quit()
             pygame.quit()
+
+    def _prepare_pygame_assets(self):
+        # Loops only if not already prepared; always singletons
+        # Avoids constant disk/Surface operations in _render_gui
+        import pygame
+        cs = self.cell_size
+        if not self._assets_prepared:
+            self._assets_prepared = True
+            taxi_filenames = [
+                path.join(path.dirname(__file__), "img/cab_front.png"),
+                path.join(path.dirname(__file__), "img/cab_rear.png"),
+                path.join(path.dirname(__file__), "img/cab_right.png"),
+                path.join(path.dirname(__file__), "img/cab_left.png"),
+            ]
+            self.taxi_imgs = [
+                pygame.transform.scale(pygame.image.load(fn), cs)
+                for fn in taxi_filenames
+            ]
+            file_name = path.join(path.dirname(__file__), "img/passenger.png")
+            self.passenger_img = pygame.transform.scale(
+                pygame.image.load(file_name), cs
+            )
+            file_name = path.join(path.dirname(__file__), "img/hotel.png")
+            self.destination_img = pygame.transform.scale(
+                pygame.image.load(file_name), cs
+            )
+            self.destination_img.set_alpha(170)
+            median_horiz_files = [
+                path.join(path.dirname(__file__), "img/gridworld_median_left.png"),
+                path.join(path.dirname(__file__), "img/gridworld_median_horiz.png"),
+                path.join(path.dirname(__file__), "img/gridworld_median_right.png"),
+            ]
+            self.median_horiz = [
+                pygame.transform.scale(pygame.image.load(fn), cs)
+                for fn in median_horiz_files
+            ]
+            median_vert_files = [
+                path.join(path.dirname(__file__), "img/gridworld_median_top.png"),
+                path.join(path.dirname(__file__), "img/gridworld_median_vert.png"),
+                path.join(path.dirname(__file__), "img/gridworld_median_bottom.png"),
+            ]
+            self.median_vert = [
+                pygame.transform.scale(pygame.image.load(fn), cs)
+                for fn in median_vert_files
+            ]
+            file_name = path.join(path.dirname(__file__), "img/taxi_background.png")
+            self.background_img = pygame.transform.scale(
+                pygame.image.load(file_name), cs
+            )
+            # Cache and draw static grid/median lines onto a single Surface for fast blit
+            if self._cached_static_bg is None:
+                sh = self.desc.shape
+                bg = pygame.Surface(WINDOW_SIZE)
+                for y in range(0, sh[0]):
+                    for x in range(0, sh[1]):
+                        cell = (x * cs[0], y * cs[1])
+                        bg.blit(self.background_img, cell)
+                        if self.desc[y][x] == b"|" and (y == 0 or self.desc[y-1][x] != b"|"):
+                            bg.blit(self.median_vert[0], cell)
+                        elif self.desc[y][x] == b"|" and (y == sh[0]-1 or self.desc[y+1][x] != b"|"):
+                            bg.blit(self.median_vert[2], cell)
+                        elif self.desc[y][x] == b"|":
+                            bg.blit(self.median_vert[1], cell)
+                        elif self.desc[y][x] == b"-" and (x == 0 or self.desc[y][x-1] != b"-"):
+                            bg.blit(self.median_horiz[0], cell)
+                        elif self.desc[y][x] == b"-" and (x == sh[1]-1 or self.desc[y][x+1] != b"-"):
+                            bg.blit(self.median_horiz[2], cell)
+                        elif self.desc[y][x] == b"-":
+                            bg.blit(self.median_horiz[1], cell)
+                # Draw colored cells (static overlays)
+                for cell, color in zip(self.locs, self.locs_colors):
+                    color_cell = pygame.Surface(cs)
+                    color_cell.set_alpha(128)
+                    color_cell.fill(color)
+                    surf_loc = self.get_surf_loc(cell)
+                    bg.blit(color_cell, (surf_loc[0], surf_loc[1] + 10))
+                self._cached_static_bg = bg
 
 
 # Taxi rider from https://franuka.itch.io/rpg-asset-pack
