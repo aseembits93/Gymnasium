@@ -1,6 +1,4 @@
 """This module provides a Blackjack functional environment and Gymnasium environment wrapper BlackJackJaxEnv."""
-
-import math
 import os
 from typing import NamedTuple, TypeAlias
 
@@ -157,6 +155,18 @@ def is_natural(hand):
         ),
         (jnp.count_nonzero(hand == 10) > 0),
     )
+
+def _get_image(pygame, filename):
+    """Load and return image from the toy_text/img directory."""
+    return pygame.image.load(os.path.join(_IMG_DIR, filename))
+
+def _get_font(pygame, size):
+    """Load and return the Minecraft font from the toy_text/font directory."""
+    return pygame.font.Font(_FONT_PATH, size)
+
+def _scale_card_img(pygame, card_img, width, height):
+    """Scale card image to the specified width and height."""
+    return pygame.transform.scale(card_img, (width, height))
 
 
 @struct.dataclass
@@ -389,6 +399,7 @@ class BlackjackFunctional(
             raise DependencyNotInstalled(
                 'pygame is not installed, run `pip install "gymnasium[toy_text]"`'
             )
+
         screen, dealer_top_card_value_str, dealer_top_card_suit = render_state
 
         player_sum, dealer_card_value, usable_ace = self.observation(state, None)
@@ -400,47 +411,29 @@ class BlackjackFunctional(
         bg_color = (7, 99, 36)
         white = (255, 255, 255)
 
+        # Determine displayed card value
         if dealer_card_value == 1:
             display_card_value = "A"
         elif dealer_card_value == 10:
             display_card_value = dealer_top_card_value_str
         else:
-            display_card_value = str(math.floor(dealer_card_value))
+            display_card_value = str(int(dealer_card_value))  # math.floor not needed for int
 
         screen.fill(bg_color)
 
-        def get_image(path):
-            cwd = os.path.dirname(__file__)
-            cwd = os.path.join(cwd, "..")
-            cwd = os.path.join(cwd, "toy_text")
-            image = pygame.image.load(os.path.join(cwd, path))
-            return image
-
-        def get_font(path, size):
-            cwd = os.path.dirname(__file__)
-            cwd = os.path.join(cwd, "..")
-            cwd = os.path.join(cwd, "toy_text")
-            font = pygame.font.Font(os.path.join(cwd, path), size)
-            return font
-
-        small_font = get_font(
-            os.path.join("font", "Minecraft.ttf"), screen_height // 15
-        )
+        # Load fonts only once per render call
+        small_font = _get_font(pygame, screen_height // 15)
         dealer_text = small_font.render(
             "Dealer: " + str(dealer_card_value), True, white
         )
         dealer_text_rect = screen.blit(dealer_text, (spacing, spacing))
 
-        def scale_card_img(card_img):
-            return pygame.transform.scale(card_img, (card_img_width, card_img_height))
-
-        dealer_card_img = scale_card_img(
-            get_image(
-                os.path.join(
-                    "img",
-                    f"{dealer_top_card_suit}{display_card_value}.png",
-                )
-            )
+        # Dealer top card
+        dealer_card_img = _scale_card_img(
+            pygame,
+            _get_image(pygame, f"{dealer_top_card_suit}{display_card_value}.png"),
+            card_img_width,
+            card_img_height,
         )
         dealer_card_rect = screen.blit(
             dealer_card_img,
@@ -450,7 +443,13 @@ class BlackjackFunctional(
             ),
         )
 
-        hidden_card_img = scale_card_img(get_image(os.path.join("img", "Card.png")))
+        # Hidden (face-down) dealer card
+        hidden_card_img = _scale_card_img(
+            pygame,
+            _get_image(pygame, "Card.png"),
+            card_img_width,
+            card_img_height,
+        )
         screen.blit(
             hidden_card_img,
             (
@@ -459,12 +458,14 @@ class BlackjackFunctional(
             ),
         )
 
+        # Player label
         player_text = small_font.render("Player", True, white)
         player_text_rect = screen.blit(
             player_text, (spacing, dealer_card_rect.bottom + 1.5 * spacing)
         )
 
-        large_font = get_font(os.path.join("font", "Minecraft.ttf"), screen_height // 6)
+        # Player sum (large font)
+        large_font = _get_font(pygame, screen_height // 6)
         player_sum_text = large_font.render(str(player_sum), True, white)
         player_sum_text_rect = screen.blit(
             player_sum_text,
@@ -474,6 +475,7 @@ class BlackjackFunctional(
             ),
         )
 
+        # Usable ace label
         if usable_ace:
             usable_ace_text = small_font.render("usable ace", True, white)
             screen.blit(
@@ -483,9 +485,12 @@ class BlackjackFunctional(
                     player_sum_text_rect.bottom + spacing // 2,
                 ),
             )
-        return render_state, np.transpose(
+
+        # Convert surface to ndarray (RGB)
+        arr = np.transpose(
             np.array(pygame.surfarray.pixels3d(screen)), axes=(1, 0, 2)
         )
+        return render_state, arr
 
     def render_close(
         self, render_state: RenderStateType, params: BlackJackParams = BlackJackParams
@@ -545,3 +550,11 @@ if __name__ == "__main__":
         print(obs, reward, terminal, truncated, info)
 
     exit()
+
+_CUR_DIR = os.path.dirname(__file__)
+
+_TOYTEXT_DIR = os.path.abspath(os.path.join(_CUR_DIR, "..", "toy_text"))
+
+_FONT_PATH = os.path.join(_TOYTEXT_DIR, "font", "Minecraft.ttf")
+
+_IMG_DIR = os.path.join(_TOYTEXT_DIR, "img")
