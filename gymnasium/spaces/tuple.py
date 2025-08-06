@@ -37,6 +37,7 @@ class Tuple(Space[tuple[Any, ...]], typing.Sequence[Any]):
             seed: Optionally, you can use this argument to seed the RNGs of the ``spaces`` to ensure reproducible sampling.
         """
         self.spaces = tuple(spaces)
+        self._len_spaces = len(self.spaces)
         for space in self.spaces:
             assert isinstance(
                 space, Space
@@ -181,7 +182,7 @@ class Tuple(Space[tuple[Any, ...]], typing.Sequence[Any]):
 
     def __len__(self) -> int:
         """Get the number of subspaces that are involved in the cartesian product."""
-        return len(self.spaces)
+        return self._len_spaces
 
     def __eq__(self, other: Any) -> bool:
         """Check whether ``other`` is equivalent to this instance."""
