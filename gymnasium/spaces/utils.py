@@ -28,6 +28,11 @@ from gymnasium.spaces import (
     Text,
     Tuple,
 )
+"""Implementation of utility functions that can be applied to spaces.
+
+These functions mostly take care of flattening and unflattening elements of spaces
+ to facilitate their usage in learning code.
+"""
 
 
 @singledispatch
@@ -246,9 +251,10 @@ def _flatten_sequence(
     space: Sequence, x: tuple[Any, ...] | Any
 ) -> tuple[Any, ...] | Any:
     if space.stack:
-        samples_iters = gym.vector.utils.iterate(space.stacked_feature_space, x)
+        samples_iters = tuple(gym.vector.utils.iterate(space.stacked_feature_space, x))
+        flatten_func = flatten.dispatch(type(space.feature_space))
         flattened_samples = [
-            flatten(space.feature_space, sample) for sample in samples_iters
+            flatten_func(space.feature_space, sample) for sample in samples_iters
         ]
         flattened_space = flatten_space(space.feature_space)
         out = gym.vector.utils.create_empty_array(
@@ -256,7 +262,8 @@ def _flatten_sequence(
         )
         return gym.vector.utils.concatenate(flattened_space, flattened_samples, out)
     else:
-        return tuple(flatten(space.feature_space, item) for item in x)
+        flatten_func = flatten.dispatch(type(space.feature_space))
+        return tuple(flatten_func(space.feature_space, item) for item in x)
 
 
 @flatten.register(OneOf)
