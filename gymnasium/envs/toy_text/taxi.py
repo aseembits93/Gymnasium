@@ -299,6 +299,9 @@ class TaxiEnv(Env):
             for state in range(num_states)
         }
 
+        # Precalculate whether to use dry/rainy per action without repeated comparison
+        build_transitions = self._build_rainy_transitions if is_rainy else self._build_dry_transitions
+
         for row in range(num_rows):
             for col in range(num_columns):
                 for pass_idx in range(len(locs) + 1):  # +1 for being inside taxi
@@ -307,22 +310,7 @@ class TaxiEnv(Env):
                         if pass_idx < 4 and pass_idx != dest_idx:
                             self.initial_state_distrib[state] += 1
                         for action in range(num_actions):
-                            if is_rainy:
-                                self._build_rainy_transitions(
-                                    row,
-                                    col,
-                                    pass_idx,
-                                    dest_idx,
-                                    action,
-                                )
-                            else:
-                                self._build_dry_transitions(
-                                    row,
-                                    col,
-                                    pass_idx,
-                                    dest_idx,
-                                    action,
-                                )
+                            build_transitions(row, col, pass_idx, dest_idx, action)
         self.initial_state_distrib /= self.initial_state_distrib.sum()
         self.action_space = spaces.Discrete(num_actions)
         self.observation_space = spaces.Discrete(num_states)
@@ -334,9 +322,11 @@ class TaxiEnv(Env):
         # pygame utils
         self.window = None
         self.clock = None
+        # Precompute these for speed
+        desc_shape_1, desc_shape_0 = self.desc.shape[1], self.desc.shape[0]
         self.cell_size = (
-            WINDOW_SIZE[0] / self.desc.shape[1],
-            WINDOW_SIZE[1] / self.desc.shape[0],
+            WINDOW_SIZE[0] / desc_shape_1,
+            WINDOW_SIZE[1] / desc_shape_0,
         )
         self.taxi_imgs = None
         self.taxi_orientation = 0
@@ -583,9 +573,11 @@ class TaxiEnv(Env):
             )
 
     def get_surf_loc(self, map_loc):
-        return (map_loc[1] * 2 + 1) * self.cell_size[0], (
-            map_loc[0] + 1
-        ) * self.cell_size[1]
+        # Optimized to minimize attribute/tuple access and float mults
+        cx, cy = self.cell_size
+        x = (map_loc[1] * 2 + 1) * cx
+        y = (map_loc[0] + 1) * cy
+        return x, y
 
     def _render_text(self):
         desc = self.desc.copy().tolist()
