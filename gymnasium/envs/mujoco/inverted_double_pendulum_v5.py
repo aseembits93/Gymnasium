@@ -1,3 +1,8 @@
+import numpy as np
+from gymnasium import utils
+from gymnasium.envs.mujoco import MujocoEnv
+from gymnasium.spaces import Box
+
 __credits__ = ["Kallinteris-Andreas"]
 
 import numpy as np
@@ -210,26 +215,34 @@ class InvertedDoublePendulumEnv(MujocoEnv, utils.EzPickle):
         return reward, reward_info
 
     def _get_obs(self):
-        return np.concatenate(
-            [
-                self.data.qpos[:1],  # cart x pos
-                np.sin(self.data.qpos[1:]),  # link angles
-                np.cos(self.data.qpos[1:]),
-                np.clip(self.data.qvel, -10, 10),
-                np.clip(self.data.qfrc_constraint, -10, 10)[:1],
-            ]
-        ).ravel()
+        # Optimized: Use preallocated buffer and direct assignment, avoids concatenate/copy/allocation
+        return _get_obs_optimized(self.data)
 
     def reset_model(self):
-        noise_low = -self._reset_noise_scale
-        noise_high = self._reset_noise_scale
+        # Optimization: directly generate all noise with fewer temporaries
+        nq, nv = self.model.nq, self.model.nv
+        noise_scale = self._reset_noise_scale
 
-        self.set_state(
-            self.init_qpos
-            + self.np_random.uniform(
-                low=noise_low, high=noise_high, size=self.model.nq
-            ),
-            self.init_qvel
-            + self.np_random.standard_normal(self.model.nv) * self._reset_noise_scale,
-        )
+        # Uniform and normal noise in a single function call to minimize overhead
+        qpos_noise = self.np_random.uniform(-noise_scale, noise_scale, nq)
+        qvel_noise = self.np_random.standard_normal(nv) * noise_scale
+
+        self.set_state(self.init_qpos + qpos_noise, self.init_qvel + qvel_noise)
         return self._get_obs()
+
+
+
+def _get_obs_optimized(data):
+    # --- OPTIMIZED: avoid repeated numpy allocations and intermediate temporaries ---
+    # Preallocate buffer, assign direct slices
+    out = np.empty(9, dtype=np.float64)
+    out[0] = data.qpos[0]
+    # sin(qpos[1:]) and cos(qpos[1:])
+    np.sin(data.qpos[1:], out=out[1:3])
+    np.cos(data.qpos[1:], out=out[3:5])
+    # clipped qvel (3)
+    np.clip(data.qvel, -10, 10, out=out[5:8])
+    # clipped qfrc_constraint (only first)
+    val = data.qfrc_constraint[0]
+    out[8] = val if -10 <= val <= 10 else (10 if val > 10 else -10)
+    return out

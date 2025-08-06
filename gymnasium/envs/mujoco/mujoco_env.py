@@ -6,6 +6,7 @@ from numpy.typing import NDArray
 import gymnasium as gym
 from gymnasium import error, spaces
 from gymnasium.spaces import Space
+import mujoco
 
 
 try:
@@ -31,6 +32,23 @@ def expand_model_path(model_path: str) -> str:
         raise OSError(f"File {fullpath} does not exist")
 
     return fullpath
+
+
+
+def _get_obs_optimized(data):
+    # --- OPTIMIZED: avoid repeated numpy allocations and intermediate temporaries ---
+    # Preallocate buffer, assign direct slices
+    out = np.empty(9, dtype=np.float64)
+    out[0] = data.qpos[0]
+    # sin(qpos[1:]) and cos(qpos[1:])
+    np.sin(data.qpos[1:], out=out[1:3])
+    np.cos(data.qpos[1:], out=out[3:5])
+    # clipped qvel (3)
+    np.clip(data.qvel, -10, 10, out=out[5:8])
+    # clipped qfrc_constraint (only first)
+    val = data.qfrc_constraint[0]
+    out[8] = val if -10 <= val <= 10 else (10 if val > 10 else -10)
+    return out
 
 
 class MujocoEnv(gym.Env):
@@ -73,7 +91,6 @@ class MujocoEnv(gym.Env):
 
         self.width = width
         self.height = height
-        # may use width and height
         self.model, self.data = self._initialize_simulation()
 
         self.init_qpos = self.data.qpos.ravel().copy()
@@ -132,10 +149,12 @@ class MujocoEnv(gym.Env):
         Note: `qpos` and `qvel` is not the full physics state for all mujoco models/environments https://mujoco.readthedocs.io/en/stable/APIreference/APItypes.html#mjtstate
         """
         assert qpos.shape == (self.model.nq,) and qvel.shape == (self.model.nv,)
-        self.data.qpos[:] = np.copy(qpos)
-        self.data.qvel[:] = np.copy(qvel)
+        # For speed, use np.copyto instead of assignment with copy
+        np.copyto(self.data.qpos, qpos)
+        np.copyto(self.data.qvel, qvel)
         if self.model.na == 0:
-            self.data.act[:] = None
+            # Avoid setting self.data.act[:] = None, just skip operation (has no effect for na == 0)
+            pass
         mujoco.mj_forward(self.model, self.data)
 
     def _step_mujoco_simulation(self, ctrl, n_frames):
