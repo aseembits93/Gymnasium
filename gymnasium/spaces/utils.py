@@ -607,9 +607,10 @@ def _is_space_fundamental_dtype_shape_equiv(space_1, space_2):
 
 @is_space_dtype_shape_equiv.register(Text)
 def _is_space_text_dtype_shape_equiv(space_1: Text, space_2):
+    if type(space_2) is not Text:
+        return False
     return (
-        isinstance(space_2, Text)
-        and space_1.max_length == space_2.max_length
+        space_1.max_length == space_2.max_length
         and space_1.character_set == space_2.character_set
     )
 
