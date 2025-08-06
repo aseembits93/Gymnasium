@@ -5,9 +5,7 @@ These functions mostly take care of flattening and unflattening elements of spac
 """
 
 from __future__ import annotations
-
-import operator as op
-from functools import reduce, singledispatch
+from functools import singledispatch
 from typing import Any, TypeVar, Union
 
 import numpy as np
@@ -61,7 +59,10 @@ def flatdim(space: Space[Any]) -> int:
 @flatdim.register(Box)
 @flatdim.register(MultiBinary)
 def _flatdim_box_multibinary(space: Box | MultiBinary) -> int:
-    return reduce(op.mul, space.shape, 1)
+    result = 1
+    for s in space.shape:
+        result *= s
+    return result
 
 
 @flatdim.register(Discrete)
