@@ -58,6 +58,8 @@ class ArrayConversion(VectorWrapper, gym.utils.RecordConstructorArgs):
         self._target_xp = target_xp
         self._env_device = env_device
         self._target_device = target_device
+        self._env_xp_name = getattr(env_xp, "__name__", str(env_xp)).replace("array_api_compat.", "")
+        self._target_xp_name = getattr(target_xp, "__name__", str(target_xp)).replace("array_api_compat.", "")
 
     def step(
         self, actions: ActType
@@ -111,15 +113,11 @@ class ArrayConversion(VectorWrapper, gym.utils.RecordConstructorArgs):
 
     def __getstate__(self):
         """Returns the object pickle state with args and kwargs."""
-        env_xp_name = self._env_xp.__name__.replace("array_api_compat.", "")
-        target_xp_name = self._target_xp.__name__.replace("array_api_compat.", "")
-        env_device = self._env_device
-        target_device = self._target_device
         return {
-            "env_xp_name": env_xp_name,
-            "target_xp_name": target_xp_name,
-            "env_device": env_device,
-            "target_device": target_device,
+            "env_xp_name": self._env_xp_name,
+            "target_xp_name": self._target_xp_name,
+            "env_device": self._env_device,
+            "target_device": self._target_device,
             "env": self.env,
         }
 
