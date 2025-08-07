@@ -8,7 +8,12 @@ from gymnasium.error import DependencyNotInstalled
 
 
 def cmp(a, b):
-    return float(a > b) - float(a < b)
+    if a > b:
+        return 1.0
+    elif a < b:
+        return -1.0
+    else:
+        return 0.0
 
 
 # 1 = Ace, 2-10 = Number cards, Jack/Queen/King = 10
