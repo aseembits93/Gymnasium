@@ -55,9 +55,7 @@ class CartPoleFunctional(
         self, rng: PRNGKeyType, params: CartPoleParams = CartPoleParams
     ) -> StateType:
         """Initial state generation."""
-        return jax.random.uniform(
-            key=rng, minval=-params.x_init, maxval=params.x_init, shape=(4,)
-        )
+        return _cartpole_initial_jit(rng, params.x_init)
 
     def transition(
         self,
@@ -310,3 +308,9 @@ class CartPoleJaxVectorEnv(FunctionalJaxVectorEnv, EzPickle):
             render_mode=render_mode,
             max_episode_steps=max_episode_steps,
         )
+
+@jax.jit
+def _cartpole_initial_jit(rng, x_init):
+    return jax.random.uniform(
+        key=rng, minval=-x_init, maxval=x_init, shape=(4,)
+    )
