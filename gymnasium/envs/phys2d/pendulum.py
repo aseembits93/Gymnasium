@@ -16,6 +16,7 @@ from gymnasium.error import DependencyNotInstalled
 from gymnasium.experimental.functional import ActType, FuncEnv
 from gymnasium.utils import EzPickle
 from gymnasium.vector import AutoresetMode
+from functools import lru_cache
 
 
 PRNGKeyType: TypeAlias = jax.Array
@@ -127,64 +128,61 @@ class PendulumFunctional(
             ) from e
         screen, clock, last_u = render_state
 
-        surf = pygame.Surface((params.screen_dim, params.screen_dim))
+        surf_dim = params.screen_dim
+        surf = pygame.Surface((surf_dim, surf_dim))
         surf.fill((255, 255, 255))
 
         bound = 2.2
-        scale = params.screen_dim / (bound * 2)
-        offset = params.screen_dim // 2
+        scale = surf_dim / (bound * 2)
+        offset = surf_dim // 2
 
-        rod_length = 1 * scale
+        rod_length = scale
         rod_width = 0.2 * scale
-        l, r, t, b = 0, rod_length, rod_width / 2, -rod_width / 2
-        coords = [(l, b), (l, t), (r, t), (r, b)]
-        transformed_coords = []
-        for c in coords:
-            c = pygame.math.Vector2(c).rotate_rad(state[0] + np.pi / 2)
-            c = (c[0] + offset, c[1] + offset)
-            transformed_coords.append(c)
-        gfxdraw.aapolygon(surf, transformed_coords, (204, 77, 77))
-        gfxdraw.filled_polygon(surf, transformed_coords, (204, 77, 77))
 
-        gfxdraw.aacircle(surf, offset, offset, int(rod_width / 2), (204, 77, 77))
-        gfxdraw.filled_circle(surf, offset, offset, int(rod_width / 2), (204, 77, 77))
+        angle = float(state[0])
+        poly_pts = _calc_rod_coords(angle, rod_length, rod_width, offset)
 
-        rod_end = (rod_length, 0)
-        rod_end = pygame.math.Vector2(rod_end).rotate_rad(state[0] + np.pi / 2)
-        rod_end = (int(rod_end[0] + offset), int(rod_end[1] + offset))
-        gfxdraw.aacircle(
-            surf, rod_end[0], rod_end[1], int(rod_width / 2), (204, 77, 77)
-        )
-        gfxdraw.filled_circle(
-            surf, rod_end[0], rod_end[1], int(rod_width / 2), (204, 77, 77)
-        )
+        color_rod = (204, 77, 77)
+        color_pin = (0, 0, 0)
 
+        gfxdraw.aapolygon(surf, poly_pts, color_rod)
+        gfxdraw.filled_polygon(surf, poly_pts, color_rod)
+
+        half_rodw = int(rod_width / 2)
+        # Pin at center
+        gfxdraw.aacircle(surf, offset, offset, half_rodw, color_rod)
+        gfxdraw.filled_circle(surf, offset, offset, half_rodw, color_rod)
+
+        # Pin at rod end
+        endx, endy = _calc_rod_end(angle, rod_length, offset)
+        gfxdraw.aacircle(surf, endx, endy, half_rodw, color_rod)
+        gfxdraw.filled_circle(surf, endx, endy, half_rodw, color_rod)
+
+        # If torque applied, show marker
         fname = path.join(path.dirname(__file__), "assets/clockwise.png")
-        img = pygame.image.load(fname)
         if last_u is not None:
-            scale_img = pygame.transform.smoothscale(
-                img,
-                (scale * np.abs(last_u) / 2, scale * np.abs(last_u) / 2),
-            )
+            img = _load_img(fname)
+            uscale = max(1, int(scale * np.abs(last_u) / 2))
+            scale_img = pygame.transform.smoothscale(img, (uscale, uscale))
             is_flip = bool(last_u > 0)
             scale_img = pygame.transform.flip(scale_img, is_flip, True)
-            surf.blit(
-                scale_img,
-                (
-                    offset - scale_img.get_rect().centerx,
-                    offset - scale_img.get_rect().centery,
-                ),
-            )
+            blit_rect = scale_img.get_rect(center=(offset, offset))
+            surf.blit(scale_img, blit_rect.topleft)
 
-        gfxdraw.aacircle(surf, offset, offset, int(0.05 * scale), (0, 0, 0))
-        gfxdraw.filled_circle(surf, offset, offset, int(0.05 * scale), (0, 0, 0))
+        pinrad = int(0.05 * scale)
+        gfxdraw.aacircle(surf, offset, offset, pinrad, color_pin)
+        gfxdraw.filled_circle(surf, offset, offset, pinrad, color_pin)
 
+        # Only one vertical flip needed
         surf = pygame.transform.flip(surf, False, True)
         screen.blit(surf, (0, 0))
 
-        return (screen, clock, last_u), np.transpose(
+        # Only make a copy of screen array, not screen itself
+        render_arr = np.transpose(
             np.array(pygame.surfarray.pixels3d(screen)), axes=(1, 0, 2)
         )
+
+        return (screen, clock, last_u), render_arr
 
     def render_init(
         self,
@@ -282,3 +280,39 @@ class PendulumJaxVectorEnv(FunctionalJaxVectorEnv, EzPickle):
             render_mode=render_mode,
             max_episode_steps=max_episode_steps,
         )
+
+
+@lru_cache(maxsize=4)
+def _load_img(fname):
+    import pygame
+    return pygame.image.load(fname)
+
+
+def _calc_rod_coords(angle, rod_length, rod_width, offset):
+    import math
+    sin_a = math.sin(angle + np.pi / 2)
+    cos_a = math.cos(angle + np.pi / 2)
+    x0, x1 = 0, rod_length
+    y0 = -rod_width / 2
+    y1 = rod_width / 2
+    rel = [
+        (x0, y0),
+        (x0, y1),
+        (x1, y1),
+        (x1, y0),
+    ]
+    pts = []
+    for xx, yy in rel:
+        rx = xx * cos_a - yy * sin_a + offset
+        ry = xx * sin_a + yy * cos_a + offset
+        pts.append((int(rx), int(ry)))
+    return pts
+
+
+def _calc_rod_end(angle, rod_length, offset):
+    import math
+    sin_a = math.sin(angle + np.pi / 2)
+    cos_a = math.cos(angle + np.pi / 2)
+    rx = rod_length * cos_a + offset
+    ry = rod_length * sin_a + offset
+    return (int(rx), int(ry))
