@@ -305,10 +305,13 @@ class CartPoleEnv(gym.Env[np.ndarray, Union[int, np.ndarray]]):
             -polewidth / 2,
         )
 
+        # Optimized pole rotation using direct math instead of pygame Vector2
+        cs, sn = math.cos(-x[2]), math.sin(-x[2])
         pole_coords = []
         for coord in [(l, b), (l, t), (r, t), (r, b)]:
-            coord = pygame.math.Vector2(coord).rotate_rad(-x[2])
-            coord = (coord[0] + cartx, coord[1] + carty + axleoffset)
+            rotated_x = coord[0] * cs - coord[1] * sn
+            rotated_y = coord[0] * sn + coord[1] * cs
+            coord = (rotated_x + cartx, rotated_y + carty + axleoffset)
             pole_coords.append(coord)
         gfxdraw.aapolygon(self.surf, pole_coords, (202, 152, 101))
         gfxdraw.filled_polygon(self.surf, pole_coords, (202, 152, 101))
