@@ -84,7 +84,8 @@ class PendulumFunctional(
     ) -> jax.Array:
         """Generates an observation based on the state."""
         theta, thetadot = state
-        return jnp.array([jnp.cos(theta), jnp.sin(theta), thetadot])
+        # Use jnp.stack for efficiency, this avoids extra copying internally
+        return jnp.stack((jnp.cos(theta), jnp.sin(theta), thetadot))
 
     def reward(
         self,
