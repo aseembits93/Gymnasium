@@ -73,7 +73,6 @@ class MujocoEnv(gym.Env):
 
         self.width = width
         self.height = height
-        # may use width and height
         self.model, self.data = self._initialize_simulation()
 
         self.init_qpos = self.data.qpos.ravel().copy()
@@ -191,12 +190,13 @@ class MujocoEnv(gym.Env):
         """
         Step the simulation n number of frames and applying a control action.
         """
-        # Check control input is contained in the action space
-        if np.array(ctrl).shape != (self.model.nu,):
+        # Fast path: avoid repeated np.array(ctrl)
+        ctrl_arr = ctrl if isinstance(ctrl, np.ndarray) else np.asarray(ctrl)
+        if ctrl_arr.shape != (self.model.nu,):
             raise ValueError(
-                f"Action dimension mismatch. Expected {(self.model.nu,)}, found {np.array(ctrl).shape}"
+                f"Action dimension mismatch. Expected {(self.model.nu,)}, found {ctrl_arr.shape}"
             )
-        self._step_mujoco_simulation(ctrl, n_frames)
+        self._step_mujoco_simulation(ctrl_arr, n_frames)
 
     def state_vector(self) -> NDArray[np.float64]:
         """Return the position and velocity joint states of the model.

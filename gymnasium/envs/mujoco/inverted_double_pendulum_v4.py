@@ -22,7 +22,6 @@ class InvertedDoublePendulumEnv(MujocoEnv, utils.EzPickle):
         ],
         "render_fps": 20,
     }
-
     def __init__(self, **kwargs):
         observation_space = Box(low=-np.inf, high=np.inf, shape=(11,), dtype=np.float64)
         MujocoEnv.__init__(
@@ -35,31 +34,44 @@ class InvertedDoublePendulumEnv(MujocoEnv, utils.EzPickle):
         )
         utils.EzPickle.__init__(self, **kwargs)
 
+        # Preallocate observation buffer for reuse to avoid allocations
+        self._obs_buf = np.empty(11, dtype=np.float64)
+
     def step(self, action):
+        # Cache attributes for faster access and reduce attribute lookups
+        data = self.data
+
         self.do_simulation(action, self.frame_skip)
         ob = self._get_obs()
-        x, _, y = self.data.site_xpos[0]
-        dist_penalty = 0.01 * x**2 + (y - 2) ** 2
-        v1, v2 = self.data.qvel[1:3]
-        vel_penalty = 1e-3 * v1**2 + 5e-3 * v2**2
-        alive_bonus = 10
-        r = alive_bonus - dist_penalty - vel_penalty
-        terminated = bool(y <= 1)
+        site_xpos_0 = data.site_xpos[0]
+        x, y = site_xpos_0[0], site_xpos_0[2]
+
+        dist_penalty = 0.01 * x * x + (y - 2.0) * (y - 2.0)
+        qvel1, qvel2 = data.qvel[1], data.qvel[2]
+        vel_penalty = 1e-3 * qvel1 * qvel1 + 5e-3 * qvel2 * qvel2
+        r = 10.0 - dist_penalty - vel_penalty
+        terminated = y <= 1.0
         if self.render_mode == "human":
             self.render()
         # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
         return ob, r, terminated, False, {}
 
     def _get_obs(self):
-        return np.concatenate(
-            [
-                self.data.qpos[:1],  # cart x pos
-                np.sin(self.data.qpos[1:]),  # link angles
-                np.cos(self.data.qpos[1:]),
-                np.clip(self.data.qvel, -10, 10),
-                np.clip(self.data.qfrc_constraint, -10, 10),
-            ]
-        ).ravel()
+        # Vectorized, buffer reuse, no redundant allocations.
+        data = self.data
+        buf = self._obs_buf
+        qpos = data.qpos      # (3,)
+        qvel = data.qvel      # (3,)
+        qfrc = data.qfrc_constraint  # (3,)
+
+        buf[0] = qpos[0]
+        np.sin(qpos[1:], out=buf[1:3])
+        np.cos(qpos[1:], out=buf[3:5])
+        # Use np.clip with out to avoid allocating temporaries
+        np.clip(qvel, -10, 10, out=buf[5:8])
+        np.clip(qfrc, -10, 10, out=buf[8:11])
+
+        return buf.copy()  # Return a copy so caller can't mutate internal buffer
 
     def reset_model(self):
         self.set_state(
