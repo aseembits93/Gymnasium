@@ -85,8 +85,9 @@ class VectorizeTransformReward(VectorRewardWrapper):
 
     def rewards(self, reward: ArrayType) -> ArrayType:
         """Iterates over the reward updating each with the wrapper func."""
+        func = self.wrapper.func
         for i, r in enumerate(reward):
-            reward[i] = self.wrapper.func(r)
+            reward[i] = func(r)
         return reward
 
 
