@@ -298,11 +298,12 @@ class DiscretizeAction(
         """Discretizes the action."""
         if self.multidiscrete:
             indices = np.asarray(act, dtype=int)
+            indices = np.clip(indices, 0, self.bins - 1)
         else:
             indices = self._unflatten_index(act)
         centers = [
-            self.bin_centers[i][min(max(idx, 0), self.bins[i] - 1)]
-            for i, idx in enumerate(indices)
+            self.bin_centers[i][indices[i]]
+            for i in range(self.n_dims)
         ]
         return np.array(centers, dtype=self.env.action_space.dtype)
 
