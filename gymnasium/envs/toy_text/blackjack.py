@@ -28,9 +28,10 @@ def usable_ace(hand):  # Does this hand have a usable ace?
 
 
 def sum_hand(hand):  # Return current hand total
-    if usable_ace(hand):
-        return sum(hand) + 10
-    return sum(hand)
+    s = sum(hand)
+    if 1 in hand and s + 10 <= 21:
+        return s + 10
+    return s
 
 
 def is_bust(hand):  # Is this hand a bust?
