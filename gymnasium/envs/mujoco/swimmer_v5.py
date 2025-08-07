@@ -1,3 +1,9 @@
+import numpy as np
+
+from gymnasium import utils
+from gymnasium.envs.mujoco import MujocoEnv
+from gymnasium.spaces import Box
+
 __credits__ = ["Kallinteris-Andreas", "Rushiv Arora"]
 
 import numpy as np
@@ -218,7 +224,7 @@ class SwimmerEnv(MujocoEnv, utils.EzPickle):
         }
 
     def control_cost(self, action):
-        control_cost = self._ctrl_cost_weight * np.sum(np.square(action))
+        control_cost = self._ctrl_cost_weight * np.dot(action, action)
         return control_cost
 
     def step(self, action):
