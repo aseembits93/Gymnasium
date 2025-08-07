@@ -38,7 +38,10 @@ def is_bust(hand):  # Is this hand a bust?
 
 
 def score(hand):  # What is the score of this hand (0 if bust)
-    return 0 if is_bust(hand) else sum_hand(hand)
+    hand_sum = sum(hand)
+    if 1 in hand and hand_sum + 10 <= 21:
+        hand_sum += 10
+    return 0 if hand_sum > 21 else hand_sum
 
 
 def is_natural(hand):  # Is this hand a natural blackjack?
