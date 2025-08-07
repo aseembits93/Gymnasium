@@ -178,15 +178,15 @@ def __getattr__(wrapper_name: str):
         AttributeError: If the wrapper does not exist.
         DeprecatedWrapper: If the version is not the latest.
     """
-    # Check if the requested wrapper is in the _wrapper_to_class dictionary
-    if wrapper_name in _wrapper_to_class:
-        import_stmt = f"gymnasium.wrappers.{_wrapper_to_class[wrapper_name]}"
-        module = importlib.import_module(import_stmt)
+    wtoc = _wrapper_to_class
+    renamed = _renamed_wrapper
+    if wrapper_name in wtoc:
+        module = importlib.import_module("gymnasium.wrappers." + wtoc[wrapper_name])
         return getattr(module, wrapper_name)
-
-    elif wrapper_name in _renamed_wrapper:
+    elif wrapper_name in renamed:
         raise AttributeError(
-            f"{wrapper_name!r} has been renamed with `wrappers.{_renamed_wrapper[wrapper_name]}`"
+            f"{wrapper_name!r} has been renamed with `wrappers.{renamed[wrapper_name]}`"
         )
-
-    raise AttributeError(f"module {__name__!r} has no attribute {wrapper_name!r}")
+    raise AttributeError(
+        f"module '{__name__}' has no attribute {wrapper_name!r}"
+    )
