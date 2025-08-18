@@ -122,7 +122,9 @@ class CartPoleFunctional(
         params: CartPoleParams = CartPoleParams,
     ) -> jax.Array:
         """Computes the reward for the state transition using the action."""
-        x, _, theta, _ = state
+        # Fast index-based access for JAX array (state has shape (4,))
+        x = state[0]
+        theta = state[2]
 
         terminated = (
             (x < -params.x_threshold)
@@ -131,12 +133,15 @@ class CartPoleFunctional(
             | (theta > params.theta_threshold_radians)
         )
 
+        # Optimize conditional order: sutton_barto_reward usually False; avoid nested cond
+        def sutton_barto_reward_fn():
+            return jax.lax.cond(terminated, lambda: -1.0, lambda: 0.0)
+        
         reward = jax.lax.cond(
             params.sutton_barto_reward,
-            lambda: jax.lax.cond(terminated, lambda: -1.0, lambda: 0.0),
-            lambda: 1.0,
+            sutton_barto_reward_fn,
+            lambda: 1.0
         )
-
         return reward
 
     def render_image(
