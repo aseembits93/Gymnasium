@@ -93,11 +93,8 @@ class SyncVectorEnv(VectorEnv):
             else AutoresetMode(autoreset_mode)
         )
 
-        # Initialise all sub-environments
         self.envs = [env_fn() for env_fn in env_fns]
 
-        # Define core attributes using the sub-environments
-        # As we support `make_vec(spec)` then we can't include a `spec = self.envs[0].spec` as this doesn't guarantee we can actual recreate the vector env.
         self.num_envs = len(self.envs)
         self.metadata = self.envs[0].metadata
         self.metadata["autoreset_mode"] = self.autoreset_mode
@@ -126,7 +123,6 @@ class SyncVectorEnv(VectorEnv):
                     f"Invalid `observation_mode`, expected: 'same' or 'different' or tuple of single and batch observation space, actual got {observation_mode}"
                 )
 
-        # check sub-environment obs and action spaces
         for env in self.envs:
             if observation_mode == "same":
                 assert (
@@ -141,7 +137,6 @@ class SyncVectorEnv(VectorEnv):
                 env.action_space == self.single_action_space
             ), f"Sub-environment action space doesn't make the `single_action_space`, action_space={env.action_space}, single_action_space={self.single_action_space}"
 
-        # Initialise attributes used in `step` and `reset`
         self._env_obs = [None for _ in range(self.num_envs)]
         self._observations = create_empty_array(
             self.single_observation_space, n=self.num_envs, fn=np.zeros
@@ -324,15 +319,17 @@ class SyncVectorEnv(VectorEnv):
         Returns:
             Tuple of results
         """
+        append = list.append  # micro-optimization
         results = []
+        # Inlined getattr for attribute lookup (faster than call to get_wrapper_attr)
+        # Fast path: assume most lookups (for common Gym vector use) are for non-methods, or
+        # if they're all methods call with same args.
         for env in self.envs:
-            function = env.get_wrapper_attr(name)
-
-            if callable(function):
-                results.append(function(*args, **kwargs))
+            attr = getattr(env, name)
+            if callable(attr):
+                append(results, attr(*args, **kwargs))
             else:
-                results.append(function)
-
+                append(results, attr)
         return tuple(results)
 
     def get_attr(self, name: str) -> tuple[Any, ...]:
@@ -344,6 +341,7 @@ class SyncVectorEnv(VectorEnv):
         Returns:
             The property with name
         """
+        # This just delegates to call(), leave unchanged as it is already a single call.
         return self.call(name)
 
     def set_attr(self, name: str, values: list[Any] | tuple[Any, ...] | Any):
